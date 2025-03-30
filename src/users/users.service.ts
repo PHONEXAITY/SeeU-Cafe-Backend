@@ -1,3 +1,4 @@
+// src/users/users.service.ts
 import {
   Injectable,
   NotFoundException,
@@ -24,20 +25,52 @@ export class UsersService {
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
+    // Create the user
     const newUser = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
-        User_id: Date.now(), // Generate a unique ID
+        User_id: BigInt(Date.now()),
       },
     });
+
+    // Assign default customer role if it exists
+    try {
+      const customerRole = await this.prisma.role.findUnique({
+        where: { name: 'customer' },
+      });
+
+      if (customerRole) {
+        await this.prisma.userRole.create({
+          data: {
+            user_id: newUser.id,
+            role_id: customerRole.id,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Failed to assign default role:', error);
+    }
 
     const { password: _password, ...result } = newUser;
     return result;
   }
 
   async findAll(role?: string) {
-    const where = role ? { role } : {};
+    let where = {};
+
+    // If role is specified, filter by the new role system
+    if (role) {
+      where = {
+        roles: {
+          some: {
+            role: {
+              name: role,
+            },
+          },
+        },
+      };
+    }
 
     const users = await this.prisma.user.findMany({
       where,
@@ -52,10 +85,23 @@ export class UsersService {
         created_at: true,
         updated_at: true,
         profile_photo: true,
+        roles: {
+          include: {
+            role: true,
+          },
+        },
       },
     });
 
-    return users;
+    // Transform the result to include a roles array
+    return users.map((user) => {
+      const roleNames = user.roles.map((ur) => ur.role.name);
+      const { roles: _roles, ...userWithoutRoles } = user;
+      return {
+        ...userWithoutRoles,
+        roles: roleNames,
+      };
+    });
   }
 
   async findOne(id: number) {
@@ -72,6 +118,11 @@ export class UsersService {
         created_at: true,
         updated_at: true,
         profile_photo: true,
+        roles: {
+          include: {
+            role: true,
+          },
+        },
       },
     });
 
@@ -79,13 +130,38 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
 
-    return user;
+    // Transform the result to include a roles array
+    const roleNames = user.roles.map((ur) => ur.role.name);
+    const { roles: _roles, ...userWithoutRoles } = user;
+
+    return {
+      ...userWithoutRoles,
+      roles: roleNames,
+    };
   }
 
   async findByEmail(email: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { email },
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+      },
     });
+
+    if (user) {
+      // Transform the result to include a roles array
+      const roleNames = user.roles.map((ur) => ur.role.name);
+      return {
+        ...user,
+        roles: roleNames,
+      };
+    }
+
+    return user;
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
@@ -123,10 +199,22 @@ export class UsersService {
         created_at: true,
         updated_at: true,
         profile_photo: true,
+        roles: {
+          include: {
+            role: true,
+          },
+        },
       },
     });
 
-    return updatedUser;
+    // Transform the result to include a roles array
+    const roleNames = updatedUser.roles.map((ur) => ur.role.name);
+    const { roles: _roles, ...userWithoutRoles } = updatedUser;
+
+    return {
+      ...userWithoutRoles,
+      roles: roleNames,
+    };
   }
 
   async remove(id: number) {

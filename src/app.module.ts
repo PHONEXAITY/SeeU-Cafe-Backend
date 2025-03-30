@@ -1,3 +1,4 @@
+// src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -9,18 +10,19 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { RolesModule } from './roles/roles.module';
 import { ProductsModule } from './products/products.module';
 import { CategoriesModule } from './categories/categories.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { EmployeesModule } from './employees/employees.module';
-/* import { DeliveriesModule } from './deliveries/deliveries.module';
-import { ReviewsModule } from './reviews/reviews.module'; */
+import { DeliveriesModule } from './deliveries/deliveries.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { TablesModule } from './tables/tables.module';
 import { BlogsModule } from './blogs/blogs.module';
-/* import { GalleryModule } from './gallery/gallery.module';
-import { SlideshowModule } from './slideshow/slideshow.module'; */
+import { GalleryModule } from './gallery/gallery.module';
+import { SlideshowModule } from './slideshow/slideshow.module';
 import { SettingsModule } from './settings/settings.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 //import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -60,18 +62,19 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    RolesModule, // Add the new RolesModule
     ProductsModule,
     CategoriesModule,
     OrdersModule,
     PaymentsModule,
     PromotionsModule,
     EmployeesModule,
-    /*     DeliveriesModule,
-    ReviewsModule, */
+    DeliveriesModule,
+    ReviewsModule,
     TablesModule,
     BlogsModule,
-    /*  GalleryModule,
-    SlideshowModule, */
+    GalleryModule,
+    SlideshowModule,
     SettingsModule,
     CloudinaryModule,
   ],

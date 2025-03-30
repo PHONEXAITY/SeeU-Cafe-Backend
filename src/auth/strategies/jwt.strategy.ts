@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 
 interface JwtPayload {
@@ -15,6 +16,7 @@ export interface UserPayload {
   id: number;
   email: string;
   role: string;
+  roles: string[];
   first_name: string | null;
   last_name: string | null;
 }
@@ -26,7 +28,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly prisma: PrismaService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: (req: Request): string | null => {
+        if (req?.cookies?.access_token) {
+          return req.cookies.access_token as string;
+        }
+        const bearerToken: string | null | undefined =
+          ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+        return bearerToken ?? null;
+      },
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('JWT_SECRET'),
     });
@@ -44,6 +53,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       },
     });
 
-    return user as UserPayload;
+    if (!user) {
+      throw new Error(`User with ID ${payload.sub} not found`);
+    }
+
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { user_id: payload.sub },
+      include: {
+        role: true,
+      },
+    });
+
+    const roleNames: string[] = userRoles.map((ur) => ur.role.name);
+
+    const result: UserPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      roles: roleNames,
+      first_name: user.first_name,
+      last_name: user.last_name,
+    };
+
+    return result;
   }
 }

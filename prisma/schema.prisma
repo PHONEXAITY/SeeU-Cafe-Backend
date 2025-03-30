@@ -7,6 +7,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Role model
+model Role {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  users       UserRole[]
+}
+
+// User-Role relationship model
+model UserRole {
+  user_id     Int
+  role_id     Int
+  assigned_at DateTime @default(now())
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role        Role     @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, role_id])
+}
+
 // User model
 model User {
   id                Int                @id @default(autoincrement())
@@ -17,7 +38,7 @@ model User {
   first_name        String?
   last_name         String?
   User_id           BigInt             @unique
-  role              String             @default("customer")
+  role              String             @default("customer") // Kept for backward compatibility
   created_at        DateTime           @default(now())
   updated_at        DateTime           @updatedAt
   orders            Order[]
@@ -28,6 +49,7 @@ model User {
   bank_name         String?
   promotionUsages   PromotionUsage[]
   userActivities    UserActivity[]
+  roles             UserRole[]
 }
 
 // Employee model
@@ -51,6 +73,7 @@ model Employee {
   delivery          Delivery[]
 }
 
+// Remaining models stay the same...
 // Table model
 model Table {
   id               Int       @id @default(autoincrement())
