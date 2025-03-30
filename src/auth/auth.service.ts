@@ -58,18 +58,28 @@ export class AuthService {
     const payload = { email: user.email, sub: user.id };
     const token = this.jwtService.sign(payload);
 
-    // Get user roles
-    const roleNames = user.roles || [];
-
-    // Set the JWT as an HTTP-only cookie
+    // Set both HTTP-only cookie and normal cookie
     this.setTokenCookie(response, token);
 
+    // Also set a non-HTTP-only cookie for frontend access
+    response.cookie('auth_token', token, {
+      maxAge:
+        parseInt(
+          this.configService.get<string>('JWT_EXPIRATION_SECONDS') || '604800',
+        ) * 1000,
+      path: '/',
+      sameSite: 'lax',
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      httpOnly: false, // Frontend accessible
+    });
+
     return {
+      access_token: token, // ส่ง token กลับไปในข้อมูล response ด้วย
       user: {
         id: user.id,
         email: user.email,
         role: user.role, // Keep for backward compatibility
-        roles: roleNames, // Add new roles array
+        roles: user.roles, // Add new roles array
         first_name: user.first_name,
         last_name: user.last_name,
         User_id: user.User_id.toString(),
@@ -119,11 +129,26 @@ export class AuthService {
     // Generate token and set cookie
     const payload = { email: user.email, sub: user.id };
     const token = this.jwtService.sign(payload);
+
+    // Set both HTTP-only cookie and normal cookie
     this.setTokenCookie(response, token);
+
+    // Also set a non-HTTP-only cookie for frontend access
+    response.cookie('auth_token', token, {
+      maxAge:
+        parseInt(
+          this.configService.get<string>('JWT_EXPIRATION_SECONDS') || '604800',
+        ) * 1000,
+      path: '/',
+      sameSite: 'lax',
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      httpOnly: false, // Frontend accessible
+    });
 
     const { password: _password, ...result } = user;
     return {
       ...result,
+      access_token: token, // ส่ง token กลับไปในข้อมูล response ด้วย
       User_id: user.User_id.toString(),
       roles: ['customer'], // Assume default role
       message: 'Registration successful',
@@ -132,6 +157,10 @@ export class AuthService {
 
   logout(response: Response) {
     this.clearTokenCookie(response);
+    response.cookie('auth_token', '', {
+      maxAge: 0,
+      path: '/',
+    });
     return { message: 'Logout successful' };
   }
 
