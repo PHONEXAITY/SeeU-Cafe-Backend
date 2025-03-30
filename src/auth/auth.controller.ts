@@ -18,6 +18,7 @@ import { LoginDto } from './dto/login.dto';
 import {
   ApiTags,
   ApiOperation,
+  ApiBearerAuth,
   ApiResponse,
   ApiCookieAuth,
 } from '@nestjs/swagger';
@@ -71,5 +72,15 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getProfile(@Request() req: RequestWithUser): UserPayload {
     return req.user;
+  }
+
+  @Get('verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify JWT token' })
+  @ApiResponse({ status: 200, description: 'Token is valid' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  verifyToken(@Request() req) {
+    return { valid: true, user: req.user };
   }
 }
