@@ -1,4 +1,3 @@
-// src/roles/roles.service.ts
 import {
   Injectable,
   NotFoundException,
@@ -13,7 +12,6 @@ export class RolesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createRoleDto: CreateRoleDto) {
-    // Check if role with the same name already exists
     const existingRole = await this.prisma.role.findUnique({
       where: { name: createRoleDto.name },
     });
@@ -31,9 +29,7 @@ export class RolesService {
 
   async findAll() {
     return this.prisma.role.findMany({
-      orderBy: {
-        name: 'asc',
-      },
+      orderBy: { name: 'asc' },
     });
   }
 
@@ -42,15 +38,11 @@ export class RolesService {
       where: { id },
       include: {
         users: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
-              },
-            },
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
           },
         },
       },
@@ -68,15 +60,11 @@ export class RolesService {
       where: { name },
       include: {
         users: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
-              },
-            },
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
           },
         },
       },
@@ -90,10 +78,8 @@ export class RolesService {
   }
 
   async update(id: number, updateRoleDto: UpdateRoleDto) {
-    // Check if role exists
     await this.findOne(id);
 
-    // If name is being updated, check if the new name is already in use
     if (updateRoleDto.name) {
       const existingRole = await this.prisma.role.findUnique({
         where: { name: updateRoleDto.name },
@@ -113,10 +99,8 @@ export class RolesService {
   }
 
   async remove(id: number) {
-    // Check if role exists
     await this.findOne(id);
 
-    // Delete the role
     await this.prisma.role.delete({
       where: { id },
     });
@@ -125,7 +109,6 @@ export class RolesService {
   }
 
   async assignRoleToUser(userId: number, roleId: number) {
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -134,7 +117,6 @@ export class RolesService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    // Check if role exists
     const role = await this.prisma.role.findUnique({
       where: { id: roleId },
     });
@@ -144,41 +126,29 @@ export class RolesService {
     }
 
     // Check if user already has this role
-    const existingAssignment = await this.prisma.userRole.findUnique({
-      where: {
-        user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      },
-    });
-
-    if (existingAssignment) {
+    if (user.role_id === roleId) {
       throw new ConflictException(`User already has the role '${role.name}'`);
     }
 
-    // Assign the role
-    await this.prisma.userRole.create({
-      data: {
-        user_id: userId,
-        role_id: roleId,
-      },
+    // Update user's role_id
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role_id: roleId },
     });
 
     return { message: `Role '${role.name}' assigned to user successfully` };
   }
 
   async removeRoleFromUser(userId: number, roleId: number) {
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: { role: true },
     });
 
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    // Check if role exists
     const role = await this.prisma.role.findUnique({
       where: { id: roleId },
     });
@@ -188,63 +158,43 @@ export class RolesService {
     }
 
     // Check if user has this role
-    const existingAssignment = await this.prisma.userRole.findUnique({
-      where: {
-        user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      },
-    });
-
-    if (!existingAssignment) {
+    if (user.role_id !== roleId) {
       throw new NotFoundException(`User does not have the role '${role.name}'`);
     }
 
-    // Remove the role
-    await this.prisma.userRole.delete({
-      where: {
-        user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      },
+    // Remove role by setting role_id to null
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role_id: null },
     });
 
     return { message: `Role '${role.name}' removed from user successfully` };
   }
 
   async getUserRoles(userId: number) {
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: { role: true },
     });
 
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    // Get user roles
-    const userRoles = await this.prisma.userRole.findMany({
-      where: { user_id: userId },
-      include: {
-        role: true,
-      },
-    });
-
-    return userRoles.map((ur) => ur.role);
+    // Return the single role (or null if no role)
+    return user.role ? [user.role] : [];
   }
 
   async hasRole(userId: number, roleName: string): Promise<boolean> {
-    const count = await this.prisma.userRole.count({
-      where: {
-        user_id: userId,
-        role: {
-          name: roleName,
-        },
-      },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { role: true },
     });
 
-    return count > 0;
+    if (!user || !user.role) {
+      return false;
+    }
+
+    return user.role.name === roleName;
   }
 }

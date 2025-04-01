@@ -14,21 +14,10 @@ model Role {
   description String?
   created_at  DateTime  @default(now())
   updated_at  DateTime  @updatedAt
-  users       UserRole[]
+  users       User[]    // ความสัมพันธ์แบบ one-to-many กับผู้ใช้
 }
 
-// User-Role relationship model
-model UserRole {
-  user_id     Int
-  role_id     Int
-  assigned_at DateTime @default(now())
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  role        Role     @relation(fields: [role_id], references: [id], onDelete: Cascade)
-
-  @@id([user_id, role_id])
-}
-
-// User model
+// User model (ปรับปรุงแล้ว)
 model User {
   id                Int                @id @default(autoincrement())
   email             String             @unique
@@ -38,7 +27,8 @@ model User {
   first_name        String?
   last_name         String?
   User_id           BigInt             @unique
-  role              String             @default("customer") // Kept for backward compatibility
+  role_id           Int?               // เพิ่มฟิลด์อ้างอิงโดยตรงถึงบทบาท
+  role              Role?              @relation(fields: [role_id], references: [id]) // สร้างความสัมพันธ์กับตาราง Role
   created_at        DateTime           @default(now())
   updated_at        DateTime           @updatedAt
   orders            Order[]
@@ -49,7 +39,6 @@ model User {
   bank_name         String?
   promotionUsages   PromotionUsage[]
   userActivities    UserActivity[]
-  roles             UserRole[]
 }
 
 // Employee model

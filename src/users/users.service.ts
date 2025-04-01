@@ -1,4 +1,3 @@
-// src/users/users.service.ts
 import {
   Injectable,
   NotFoundException,
@@ -14,60 +13,38 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createUserDto: CreateUserDto) {
-    // Check if user with email already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
     });
-
     if (existingUser) {
-      throw new ConflictException('Email already exists');
+      throw new ConflictException('อีเมลนี้มีผู้ใช้งานอยู่แล้ว');
     }
-
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
-
-    // Create the user
     const newUser = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
         User_id: BigInt(Date.now()),
+        role_id: createUserDto.role_id || null,
       },
     });
-
-    // Assign default customer role if it exists
-    try {
-      const customerRole = await this.prisma.role.findUnique({
-        where: { name: 'customer' },
-      });
-
-      if (customerRole) {
-        await this.prisma.userRole.create({
-          data: {
-            user_id: newUser.id,
-            role_id: customerRole.id,
-          },
-        });
-      }
-    } catch (error) {
-      console.error('Failed to assign default role:', error);
-    }
-
-    const { password: _password, ...result } = newUser;
+    const userWithRole = await this.prisma.user.findUnique({
+      where: { id: newUser.id },
+      include: {
+        role: true,
+      },
+    });
+    const { password: _, ...result } = userWithRole!;
     return result;
   }
 
-  async findAll(role?: string) {
+  async findAll(roleName?: string) {
     let where = {};
 
-    // If role is specified, filter by the new role system
-    if (role) {
+    if (roleName) {
       where = {
-        roles: {
-          some: {
-            role: {
-              name: role,
-            },
-          },
+        role: {
+          name: roleName,
         },
       };
     }
@@ -81,62 +58,35 @@ export class UsersService {
         last_name: true,
         phone: true,
         address: true,
-        role: true,
         created_at: true,
         updated_at: true,
         profile_photo: true,
-        roles: {
-          include: {
-            role: true,
-          },
-        },
+        role: true,
       },
     });
 
-    // Transform the result to include a roles array
-    return users.map((user) => {
-      const roleNames = user.roles.map((ur) => ur.role.name);
-      const { roles: _roles, ...userWithoutRoles } = user;
-      return {
-        ...userWithoutRoles,
-        roles: roleNames,
-      };
-    });
+    return users.map((user) => ({
+      ...user,
+      role_name: user.role?.name || null,
+    }));
   }
 
   async findOne(id: number) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        phone: true,
-        address: true,
+      include: {
         role: true,
-        created_at: true,
-        updated_at: true,
-        profile_photo: true,
-        roles: {
-          include: {
-            role: true,
-          },
-        },
       },
     });
 
     if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
+      throw new NotFoundException(`ไม่พบผู้ใช้ที่มี ID ${id}`);
     }
 
-    // Transform the result to include a roles array
-    const roleNames = user.roles.map((ur) => ur.role.name);
-    const { roles: _roles, ...userWithoutRoles } = user;
-
+    const { password: _, ...result } = user;
     return {
-      ...userWithoutRoles,
-      roles: roleNames,
+      ...result,
+      role_name: user.role?.name || null,
     };
   }
 
@@ -144,42 +94,26 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
+        role: true,
       },
     });
-
-    if (user) {
-      // Transform the result to include a roles array
-      const roleNames = user.roles.map((ur) => ur.role.name);
-      return {
-        ...user,
-        roles: roleNames,
-      };
-    }
 
     return user;
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
-    // Check if user exists
     await this.findOne(id);
 
-    // If email is being updated, check if the new email is already in use
     if (updateUserDto.email) {
       const existingUser = await this.prisma.user.findUnique({
         where: { email: updateUserDto.email },
       });
 
       if (existingUser && existingUser.id !== id) {
-        throw new ConflictException('Email already exists');
+        throw new ConflictException('อีเมลนี้มีผู้ใช้งานอยู่แล้ว');
       }
     }
 
-    // If password is being updated, hash it
     const data = { ...updateUserDto };
     if (data.password) {
       data.password = await bcrypt.hash(data.password, 10);
@@ -188,43 +122,45 @@ export class UsersService {
     const updatedUser = await this.prisma.user.update({
       where: { id },
       data,
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        phone: true,
-        address: true,
+      include: {
         role: true,
-        created_at: true,
-        updated_at: true,
-        profile_photo: true,
-        roles: {
-          include: {
-            role: true,
-          },
-        },
       },
     });
 
-    // Transform the result to include a roles array
-    const roleNames = updatedUser.roles.map((ur) => ur.role.name);
-    const { roles: _roles, ...userWithoutRoles } = updatedUser;
-
+    const { password: _, ...result } = updatedUser;
     return {
-      ...userWithoutRoles,
-      roles: roleNames,
+      ...result,
+      role_name: updatedUser.role?.name || null,
     };
   }
 
   async remove(id: number) {
-    // Check if user exists
     await this.findOne(id);
 
     await this.prisma.user.delete({
       where: { id },
     });
 
-    return { message: 'User deleted successfully' };
+    return { message: 'ลบผู้ใช้สำเร็จ' };
+  }
+
+  async changeRole(userId: number, roleId: number) {
+    await this.findOne(userId); // Fixed ESLint no-unused-vars
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+    });
+    if (!role) {
+      throw new NotFoundException(`ไม่พบบทบาทที่มี ID ${roleId}`);
+    }
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role_id: roleId },
+      include: { role: true },
+    });
+    const { password: _, ...result } = updatedUser;
+    return {
+      ...result,
+      role_name: updatedUser.role?.name || null,
+    };
   }
 }

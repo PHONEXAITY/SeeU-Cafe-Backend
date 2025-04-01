@@ -33,13 +33,28 @@ async function main() {
   // Create admin user
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
+  const adminRole = await prisma.role.upsert({
+    where: { name: 'admin' },
+    update: {},
+    create: {
+      name: 'admin',
+      description: 'Administrator with full access',
+      // Add other role fields if your schema requires them
+    },
+  });
+
+  // Then create the admin user and connect to the role
   const adminUser = await prisma.user.create({
     data: {
       email: 'admin@seeu.cafe',
       password: hashedPassword,
       first_name: 'Admin',
       last_name: 'User',
-      role: 'admin',
+      role: {
+        connect: {
+          id: adminRole.id,
+        },
+      },
       User_id: 1,
     },
   });

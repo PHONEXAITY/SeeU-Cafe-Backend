@@ -1,4 +1,3 @@
-// src/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
@@ -23,28 +22,17 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<any> {
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
-      },
+      include: { role: true },
     });
 
     if (user && (await bcrypt.compare(password, user.password))) {
       const { password: _password, ...result } = user;
-
-      // Extract role names from the roles relationship
-      const roleNames = user.roles.map((ur) => ur.role.name);
-
       return {
         ...result,
         User_id: user.User_id.toString(),
-        roles: roleNames,
+        role_name: user.role?.name || null,
       };
     }
-
     return null;
   }
 
@@ -52,16 +40,18 @@ export class AuthService {
     const user = await this.validateUser(loginDto.email, loginDto.password);
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     }
 
-    const payload = { email: user.email, sub: user.id };
+    const payload = {
+      email: user.email,
+      sub: user.id,
+      role: user.role?.name || null,
+    };
     const token = this.jwtService.sign(payload);
 
-    // Set both HTTP-only cookie and normal cookie
     this.setTokenCookie(response, token);
 
-    // Also set a non-HTTP-only cookie for frontend access
     response.cookie('auth_token', token, {
       maxAge:
         parseInt(
@@ -70,21 +60,20 @@ export class AuthService {
       path: '/',
       sameSite: 'lax',
       secure: this.configService.get<string>('NODE_ENV') === 'production',
-      httpOnly: false, // Frontend accessible
+      httpOnly: false,
     });
 
     return {
-      access_token: token, // ส่ง token กลับไปในข้อมูล response ด้วย
+      access_token: token,
       user: {
         id: user.id,
         email: user.email,
-        role: user.role, // Keep for backward compatibility
-        roles: user.roles, // Add new roles array
+        role: user.role?.name || null,
         first_name: user.first_name,
         last_name: user.last_name,
         User_id: user.User_id.toString(),
       },
-      message: 'Login successful',
+      message: 'เข้าสู่ระบบสำเร็จ',
     };
   }
 
@@ -94,47 +83,35 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Email is already registered');
+      throw new ConflictException('อีเมลนี้มีผู้ใช้งานอยู่แล้ว');
     }
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-    // Create the user
+    const customerRole = await this.prisma.role.findUnique({
+      where: { name: 'customer' },
+    });
+
     const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
         User_id: BigInt(Date.now()),
+        role_id: customerRole?.id || null,
       },
+      include: { role: true },
     });
 
-    // Assign default customer role if it exists
-    try {
-      const customerRole = await this.prisma.role.findUnique({
-        where: { name: 'customer' },
-      });
-
-      if (customerRole) {
-        await this.prisma.userRole.create({
-          data: {
-            user_id: user.id,
-            role_id: customerRole.id,
-          },
-        });
-      }
-    } catch (error) {
-      console.error('Failed to assign default role:', error);
-    }
-
-    // Generate token and set cookie
-    const payload = { email: user.email, sub: user.id };
+    const payload = {
+      email: user.email,
+      sub: user.id,
+      role: user.role?.name || null,
+    };
     const token = this.jwtService.sign(payload);
 
-    // Set both HTTP-only cookie and normal cookie
     this.setTokenCookie(response, token);
 
-    // Also set a non-HTTP-only cookie for frontend access
-    response.cookie('auth_token', token, {
+    response.cookie('customer', token, {
       maxAge:
         parseInt(
           this.configService.get<string>('JWT_EXPIRATION_SECONDS') || '604800',
@@ -142,16 +119,16 @@ export class AuthService {
       path: '/',
       sameSite: 'lax',
       secure: this.configService.get<string>('NODE_ENV') === 'production',
-      httpOnly: false, // Frontend accessible
+      httpOnly: false,
     });
 
     const { password: _password, ...result } = user;
     return {
       ...result,
-      access_token: token, // ส่ง token กลับไปในข้อมูล response ด้วย
+      access_token: token,
       User_id: user.User_id.toString(),
-      roles: ['customer'], // Assume default role
-      message: 'Registration successful',
+      role_name: user.role?.name || null,
+      message: 'ลงทะเบียนสำเร็จ',
     };
   }
 
@@ -161,24 +138,22 @@ export class AuthService {
       maxAge: 0,
       path: '/',
     });
-    return { message: 'Logout successful' };
+    return { message: 'ออกจากระบบสำเร็จ' };
   }
 
   private setTokenCookie(response: Response, token: string) {
-    // Get settings from config
     const secure = this.configService.get<string>('NODE_ENV') === 'production';
     const domain = this.configService.get<string>('COOKIE_DOMAIN') || undefined;
     const maxAge = parseInt(
       this.configService.get<string>('JWT_EXPIRATION_SECONDS') || '604800',
-    ); // Default 7 days
+    );
 
-    // Set the JWT as an HTTP-only cookie
-    response.cookie('access_token', token, {
+    response.cookie('auth_token', token, {
       httpOnly: true,
       secure,
       sameSite: 'lax',
       domain,
-      maxAge: maxAge * 1000, // Convert to milliseconds
+      maxAge: maxAge * 1000,
       path: '/',
     });
   }
@@ -186,7 +161,7 @@ export class AuthService {
   private clearTokenCookie(response: Response) {
     const domain = this.configService.get<string>('COOKIE_DOMAIN') || undefined;
 
-    response.clearCookie('access_token', {
+    response.clearCookie('auth_token', {
       httpOnly: true,
       domain,
       path: '/',

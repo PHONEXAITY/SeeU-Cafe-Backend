@@ -27,6 +27,9 @@ async function bootstrap() {
     }),
   );
 
+  (BigInt.prototype as any).toJSON = function () {
+    return (this as unknown as bigint).toString();
+  };
   // Security middleware
   app.use(helmet());
   app.use(compression());

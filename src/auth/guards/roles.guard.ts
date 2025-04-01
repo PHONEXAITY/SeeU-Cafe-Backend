@@ -1,4 +1,3 @@
-// src/auth/guards/roles.guard.ts
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
@@ -29,18 +28,7 @@ export class RolesGuard implements CanActivate {
       return false;
     }
 
-    // Check if user has any of the required roles
-    // First check new roles array
-    if (user.roles && Array.isArray(user.roles)) {
-      const hasRole = requiredRoles.some((role) => user.roles.includes(role));
-      if (hasRole) return true;
-    }
-
-    // Fallback to legacy role field for backward compatibility
-    if (user.role) {
-      return requiredRoles.includes(user.role);
-    }
-
-    return false;
+    // ตรวจสอบว่าผู้ใช้มีบทบาทที่ต้องการหรือไม่
+    return requiredRoles.includes(user.role);
   }
 }

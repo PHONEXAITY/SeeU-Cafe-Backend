@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 interface JwtPayload {
   sub: number;
   email: string;
+  role?: string;
   iat?: number;
   exp?: number;
 }
@@ -16,7 +17,6 @@ export interface UserPayload {
   id: number;
   email: string;
   role: string;
-  roles: string[];
   first_name: string | null;
   last_name: string | null;
 }
@@ -44,33 +44,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: JwtPayload): Promise<UserPayload> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        first_name: true,
-        last_name: true,
-      },
-    });
-
-    if (!user) {
-      throw new Error(`User with ID ${payload.sub} not found`);
-    }
-
-    const userRoles = await this.prisma.userRole.findMany({
-      where: { user_id: payload.sub },
       include: {
         role: true,
       },
     });
 
-    const roleNames: string[] = userRoles.map((ur) => ur.role.name);
+    if (!user) {
+      throw new Error(`ไม่พบผู้ใช้ที่มี ID ${payload.sub}`);
+    }
 
     const result: UserPayload = {
       id: user.id,
       email: user.email,
-      role: user.role,
-      roles: roleNames,
+      role: user.role?.name || 'guest',
       first_name: user.first_name,
       last_name: user.last_name,
     };

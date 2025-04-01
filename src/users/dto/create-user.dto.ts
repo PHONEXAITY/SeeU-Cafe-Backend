@@ -1,9 +1,11 @@
+// src/users/dto/create-user.dto.ts (Updated)
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsInt,
   MinLength,
   MaxLength,
   Matches,
@@ -11,7 +13,7 @@ import {
 
 export class CreateUserDto {
   @ApiProperty({
-    description: 'The email of the user',
+    description: 'อีเมลของผู้ใช้',
     example: 'john@example.com',
   })
   @IsEmail()
@@ -19,7 +21,7 @@ export class CreateUserDto {
   email: string;
 
   @ApiProperty({
-    description: 'The password of the user',
+    description: 'รหัสผ่านของผู้ใช้',
     example: 'Password123!',
   })
   @IsString()
@@ -27,12 +29,12 @@ export class CreateUserDto {
   @MinLength(8)
   @MaxLength(30)
   @Matches(/((?=.*\d)|(?=.*\W+))(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$/, {
-    message: 'Password is too weak',
+    message: 'รหัสผ่านอ่อนเกินไป',
   })
   password: string;
 
   @ApiPropertyOptional({
-    description: 'The first name of the user',
+    description: 'ชื่อของผู้ใช้',
     example: 'John',
   })
   @IsString()
@@ -40,7 +42,7 @@ export class CreateUserDto {
   first_name?: string;
 
   @ApiPropertyOptional({
-    description: 'The last name of the user',
+    description: 'นามสกุลของผู้ใช้',
     example: 'Doe',
   })
   @IsString()
@@ -48,7 +50,7 @@ export class CreateUserDto {
   last_name?: string;
 
   @ApiPropertyOptional({
-    description: 'The phone number of the user',
+    description: 'เบอร์โทรศัพท์ของผู้ใช้',
     example: '+1234567890',
   })
   @IsString()
@@ -56,7 +58,7 @@ export class CreateUserDto {
   phone?: string;
 
   @ApiPropertyOptional({
-    description: 'The address of the user',
+    description: 'ที่อยู่ของผู้ใช้',
     example: '123 Main St, City, Country',
   })
   @IsString()
@@ -64,10 +66,18 @@ export class CreateUserDto {
   address?: string;
 
   @ApiPropertyOptional({
-    description: 'The profile photo URL',
+    description: 'รูปโปรไฟล์ URL',
     example: 'https://example.com/photo.jpg',
   })
   @IsString()
   @IsOptional()
   profile_photo?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID ของบทบาท',
+    example: 1,
+  })
+  @IsInt()
+  @IsOptional()
+  role_id?: number;
 }
