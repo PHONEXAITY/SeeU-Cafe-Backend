@@ -2,17 +2,55 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
 import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { MenuCategory } from '@prisma/client';
+import { FormattedMenuCategory } from '../interfaces/category.interface';
 
 @Injectable()
 export class MenuCategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {}
 
-  async create(createMenuCategoryDto: CreateMenuCategoryDto) {
-    // If parent_id is provided, verify it exists
+  private readonly ALL_CATEGORIES_CACHE_KEY = 'all_menu_categories';
+  private readonly CATEGORY_TYPE_CACHE_PREFIX = 'menu_categories_type_';
+  private readonly CATEGORY_ID_CACHE_PREFIX = 'menu_category_id_';
+
+  private async clearCategoryCaches(category?: MenuCategory): Promise<void> {
+    await this.cacheManager.del(this.ALL_CATEGORIES_CACHE_KEY);
+
+    if (category?.type) {
+      await this.cacheManager.del(
+        `${this.CATEGORY_TYPE_CACHE_PREFIX}${category.type}`,
+      );
+    }
+
+    if (category?.id) {
+      await this.cacheManager.del(
+        `${this.CATEGORY_ID_CACHE_PREFIX}${category.id}`,
+      );
+    }
+  }
+
+  private formatCategory(category: MenuCategory): FormattedMenuCategory {
+    return {
+      ...category,
+      category_id: category.category_id.toString(),
+      foodMenus: [],
+      beverageMenus: [],
+    };
+  }
+
+  async create(
+    createMenuCategoryDto: CreateMenuCategoryDto,
+  ): Promise<FormattedMenuCategory> {
     if (createMenuCategoryDto.parent_id) {
       const parentCategory = await this.prisma.menuCategory.findUnique({
         where: { id: createMenuCategoryDto.parent_id },
@@ -25,7 +63,6 @@ export class MenuCategoriesService {
       }
     }
 
-    // Generate a unique category_id
     const categoryId = BigInt(Date.now());
 
     const menuCategory = await this.prisma.menuCategory.create({
@@ -35,14 +72,22 @@ export class MenuCategoriesService {
       },
     });
 
-    // แปลง category_id เป็น string
-    return {
-      ...menuCategory,
-      category_id: menuCategory.category_id.toString(),
-    };
+    await this.clearCategoryCaches(menuCategory);
+
+    return this.formatCategory(menuCategory);
   }
 
-  async findAll(type?: string) {
+  async findAll(type?: string): Promise<FormattedMenuCategory[]> {
+    const cacheKey = type
+      ? `${this.CATEGORY_TYPE_CACHE_PREFIX}${type}`
+      : this.ALL_CATEGORIES_CACHE_KEY;
+
+    const cachedCategories =
+      await this.cacheManager.get<FormattedMenuCategory[]>(cacheKey);
+    if (cachedCategories) {
+      return cachedCategories;
+    }
+
     const where = type ? { type } : {};
 
     const categories = await this.prisma.menuCategory.findMany({
@@ -52,14 +97,29 @@ export class MenuCategoriesService {
       },
     });
 
-    // แปลง category_id เป็น string ในทุก object
-    return categories.map((category) => ({
-      ...category,
-      category_id: category.category_id.toString(),
-    }));
+    const formattedCategories = categories.map((category) =>
+      this.formatCategory(category),
+    );
+
+    await this.cacheManager.set(cacheKey, formattedCategories);
+
+    return formattedCategories;
   }
 
-  async findOne(id: number) {
+  async findOne(
+    id: number,
+  ): Promise<
+    FormattedMenuCategory & { foodMenus: any[]; beverageMenus: any[] }
+  > {
+    const cacheKey = `${this.CATEGORY_ID_CACHE_PREFIX}${id}`;
+
+    const cachedCategory = await this.cacheManager.get<
+      FormattedMenuCategory & { foodMenus: any[]; beverageMenus: any[] }
+    >(cacheKey);
+    if (cachedCategory) {
+      return cachedCategory;
+    }
+
     const category = await this.prisma.menuCategory.findUnique({
       where: { id },
       include: {
@@ -72,20 +132,24 @@ export class MenuCategoriesService {
       throw new NotFoundException(`Menu category with ID ${id} not found`);
     }
 
-    // แปลง category_id เป็น string
-    return {
-      ...category,
-      category_id: category.category_id.toString(),
+    const formattedCategory = {
+      ...this.formatCategory(category),
+      foodMenus: category.foodMenus,
+      beverageMenus: category.beverageMenus,
     };
+
+    await this.cacheManager.set(cacheKey, formattedCategory);
+
+    return formattedCategory;
   }
 
-  async update(id: number, updateMenuCategoryDto: UpdateMenuCategoryDto) {
-    // Check if category exists
+  async update(
+    id: number,
+    updateMenuCategoryDto: UpdateMenuCategoryDto,
+  ): Promise<FormattedMenuCategory> {
     await this.findOne(id);
 
-    // If parent_id is being updated, verify the new parent exists
     if (updateMenuCategoryDto.parent_id) {
-      // Check for circular reference (category can't be its own parent)
       if (updateMenuCategoryDto.parent_id === id) {
         throw new ConflictException('Category cannot be its own parent');
       }
@@ -106,18 +170,14 @@ export class MenuCategoriesService {
       data: updateMenuCategoryDto,
     });
 
-    // แปลง category_id เป็น string
-    return {
-      ...updatedCategory,
-      category_id: updatedCategory.category_id.toString(),
-    };
+    await this.clearCategoryCaches(updatedCategory);
+
+    return this.formatCategory(updatedCategory);
   }
 
-  async remove(id: number) {
-    // Check if category exists
+  async remove(id: number): Promise<{ message: string }> {
     const category = await this.findOne(id);
 
-    // Check if category has children categories
     const childCategories = await this.prisma.menuCategory.findMany({
       where: { parent_id: id },
     });
@@ -128,7 +188,6 @@ export class MenuCategoriesService {
       );
     }
 
-    // Check if category has associated menu items
     if (category.type === 'food' && category.foodMenus.length > 0) {
       throw new ConflictException(
         'Cannot delete category with associated food menu items',
@@ -144,6 +203,11 @@ export class MenuCategoriesService {
     await this.prisma.menuCategory.delete({
       where: { id },
     });
+
+    await this.clearCategoryCaches({
+      id: category.id,
+      type: category.type,
+    } as MenuCategory);
 
     return { message: 'Menu category deleted successfully' };
   }

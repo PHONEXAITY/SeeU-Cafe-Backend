@@ -2,17 +2,18 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
+import { UpdateTableTimeDto } from './dto/update-table-time.dto';
 
 @Injectable()
 export class TablesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createTableDto: CreateTableDto) {
-    // Check if table with the same number already exists
     const existingTable = await this.prisma.table.findUnique({
       where: { number: createTableDto.number },
     });
@@ -23,7 +24,6 @@ export class TablesService {
       );
     }
 
-    // Generate a unique table_id
     const tableId = BigInt(Date.now());
 
     const table = await this.prisma.table.create({
@@ -33,7 +33,6 @@ export class TablesService {
       },
     });
 
-    // แปลง table_id เป็น string
     return {
       ...table,
       table_id: table.table_id.toString(),
@@ -50,7 +49,26 @@ export class TablesService {
       },
     });
 
-    // แปลง table_id เป็น string ในทุก object
+    return tables.map((table) => ({
+      ...table,
+      table_id: table.table_id.toString(),
+    }));
+  }
+
+  async findAvailableTables(capacity?: number) {
+    const where: any = { status: 'available' };
+
+    if (capacity) {
+      where.capacity = {
+        gte: capacity,
+      };
+    }
+
+    const tables = await this.prisma.table.findMany({
+      where,
+      orderBy: [{ capacity: 'asc' }, { number: 'asc' }],
+    });
+
     return tables.map((table) => ({
       ...table,
       table_id: table.table_id.toString(),
@@ -71,6 +89,14 @@ export class TablesService {
             create_at: 'desc',
           },
           take: 5,
+          include: {
+            order_details: {
+              include: {
+                food_menu: true,
+                beverage_menu: true,
+              },
+            },
+          },
         },
       },
     });
@@ -79,7 +105,6 @@ export class TablesService {
       throw new NotFoundException(`Table with ID ${id} not found`);
     }
 
-    // แปลง table_id เป็น string
     return {
       ...table,
       table_id: table.table_id.toString(),
@@ -100,6 +125,14 @@ export class TablesService {
             create_at: 'desc',
           },
           take: 5,
+          include: {
+            order_details: {
+              include: {
+                food_menu: true,
+                beverage_menu: true,
+              },
+            },
+          },
         },
       },
     });
@@ -108,7 +141,6 @@ export class TablesService {
       throw new NotFoundException(`Table with number ${number} not found`);
     }
 
-    // แปลง table_id เป็น string
     return {
       ...table,
       table_id: table.table_id.toString(),
@@ -116,10 +148,8 @@ export class TablesService {
   }
 
   async update(id: number, updateTableDto: UpdateTableDto) {
-    // Check if table exists
     await this.findOne(id);
 
-    // If table number is being updated, check if the new number is already in use
     if (updateTableDto.number) {
       const existingTable = await this.prisma.table.findUnique({
         where: { number: updateTableDto.number },
@@ -137,7 +167,6 @@ export class TablesService {
       data: updateTableDto,
     });
 
-    // แปลง table_id เป็น string
     return {
       ...updatedTable,
       table_id: updatedTable.table_id.toString(),
@@ -145,15 +174,147 @@ export class TablesService {
   }
 
   async updateStatus(id: number, status: string) {
-    // Check if table exists
-    await this.findOne(id);
+    const table = await this.findOne(id);
 
     const updatedTable = await this.prisma.table.update({
       where: { id },
       data: { status },
     });
 
-    // แปลง table_id เป็น string
+    if (status === 'occupied' && table.status !== 'occupied') {
+      await this.prisma.table.update({
+        where: { id },
+        data: {
+          current_session_start: new Date(),
+          expected_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        },
+      });
+    }
+
+    if (status === 'available' && table.status === 'occupied') {
+      await this.prisma.table.update({
+        where: { id },
+        data: {
+          current_session_start: null,
+          expected_end_time: null,
+        },
+      });
+    }
+
+    return {
+      ...updatedTable,
+      table_id: updatedTable.table_id.toString(),
+    };
+  }
+
+  async updateTime(id: number, updateTableTimeDto: UpdateTableTimeDto) {
+    const table = await this.findOne(id);
+
+    if (table.status !== 'occupied') {
+      throw new BadRequestException(
+        'Cannot update time for a table that is not occupied',
+      );
+    }
+
+    const updatedTable = await this.prisma.table.update({
+      where: { id },
+      data: {
+        expected_end_time: updateTableTimeDto.expectedEndTime,
+      },
+    });
+
+    if (
+      updateTableTimeDto.notifyCustomers &&
+      table.orders &&
+      table.orders.length > 0
+    ) {
+      const activeOrders = table.orders.filter(
+        (order) =>
+          !['cancelled', 'completed', 'delivered'].includes(order.status),
+      );
+
+      for (const order of activeOrders) {
+        if (order.User_id) {
+          await this.prisma.customerNotification.create({
+            data: {
+              user_id: order.User_id,
+              order_id: order.id,
+              message:
+                updateTableTimeDto.notificationMessage ||
+                `Your table reservation time has been updated. New end time: ${updateTableTimeDto.expectedEndTime.toLocaleString()}`,
+              type: 'time_change',
+              action_url: `/orders/${order.order_id}`,
+            },
+          });
+        }
+      }
+    }
+
+    return {
+      ...updatedTable,
+      table_id: updatedTable.table_id.toString(),
+    };
+  }
+
+  async startSession(id: number) {
+    const table = await this.findOne(id);
+
+    if (table.status === 'occupied') {
+      throw new BadRequestException('Table is already occupied');
+    }
+
+    if (table.status !== 'available') {
+      throw new BadRequestException(
+        `Cannot start session for table with status: ${table.status}`,
+      );
+    }
+
+    const updatedTable = await this.prisma.table.update({
+      where: { id },
+      data: {
+        status: 'occupied',
+        current_session_start: new Date(),
+        expected_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000),
+      },
+    });
+
+    return {
+      ...updatedTable,
+      table_id: updatedTable.table_id.toString(),
+    };
+  }
+
+  async endSession(id: number) {
+    const table = await this.findOne(id);
+
+    if (table.status !== 'occupied') {
+      throw new BadRequestException('Table is not currently occupied');
+    }
+
+    const activeOrders = await this.prisma.order.findMany({
+      where: {
+        table_id: id,
+        status: {
+          in: ['pending', 'preparing', 'ready', 'served'],
+        },
+      },
+    });
+
+    if (activeOrders.length > 0) {
+      throw new ConflictException(
+        'Cannot end session with active orders. Please complete or cancel all orders first.',
+      );
+    }
+
+    const updatedTable = await this.prisma.table.update({
+      where: { id },
+      data: {
+        status: 'available',
+        current_session_start: null,
+        expected_end_time: null,
+      },
+    });
+
     return {
       ...updatedTable,
       table_id: updatedTable.table_id.toString(),
@@ -161,10 +322,8 @@ export class TablesService {
   }
 
   async remove(id: number) {
-    // Check if table exists
     await this.findOne(id);
 
-    // Check if table has associated orders
     const ordersCount = await this.prisma.order.count({
       where: { table_id: id },
     });
@@ -177,6 +336,8 @@ export class TablesService {
       where: { id },
     });
 
-    return { message: 'Table deleted successfully' };
+    return {
+      message: 'Table deleted successfully',
+    };
   }
 }

@@ -21,6 +21,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiBody,
 } from '@nestjs/swagger';
 
 @ApiTags('Payments')
@@ -87,6 +88,19 @@ export class PaymentsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['pending', 'completed', 'failed', 'refunded', 'cancelled'],
+          example: 'completed',
+        },
+      },
+      required: ['status'],
+    },
+  })
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.paymentsService.updateStatus(+id, status);
   }

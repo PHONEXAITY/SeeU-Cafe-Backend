@@ -12,6 +12,7 @@ import {
 import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
+import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -21,6 +22,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiBody,
 } from '@nestjs/swagger';
 
 @ApiTags('Deliveries')
@@ -116,13 +118,51 @@ export class DeliveriesController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Delivery not found' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          example: 'out_for_delivery',
+          enum: [
+            'pending',
+            'preparing',
+            'out_for_delivery',
+            'delivered',
+            'cancelled',
+          ],
+        },
+      },
+      required: ['status'],
+    },
+  })
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.deliveriesService.updateStatus(+id, status);
+  }
+
+  @Patch(':id/time')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'employee')
+  @ApiOperation({ summary: 'Update delivery time (Admin or Employee)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Delivery time updated successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Delivery not found' })
+  updateTime(
+    @Param('id') id: string,
+    @Body() updateTimeDto: UpdateDeliveryTimeDto,
+  ) {
+    return this.deliveriesService.updateTime(+id, updateTimeDto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('admin')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a delivery (Admin only)' })
   @ApiResponse({ status: 200, description: 'Delivery deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

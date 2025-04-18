@@ -6,7 +6,9 @@ import {
   IsString,
   IsOptional,
   IsDateString,
+  IsNumber,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 enum DeliveryStatus {
   PENDING = 'pending',
@@ -65,5 +67,22 @@ export class CreateDeliveryDto {
   })
   @IsDateString()
   @IsOptional()
-  estimated_time?: string;
+  estimated_delivery_time?: string;
+
+  @ApiPropertyOptional({
+    description: 'Delivery fee',
+    example: 50,
+  })
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  delivery_fee?: number;
+
+  @ApiPropertyOptional({
+    description: 'Customer note for delivery',
+    example: 'Please leave at the front door',
+  })
+  @IsString()
+  @IsOptional()
+  customer_note?: string;
 }

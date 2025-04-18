@@ -14,6 +14,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { GalleryService } from './gallery.service';
 import { CreateGalleryDto } from './dto/create-gallery.dto';
+import { CreateGalleryUploadDto } from './dto/create-gallery-upload.dto'; // Import new DTO
 import { UpdateGalleryDto } from './dto/update-gallery.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -61,16 +62,9 @@ export class GalleryController {
     schema: {
       type: 'object',
       properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-        },
-        title: {
-          type: 'string',
-        },
-        category: {
-          type: 'string',
-        },
+        file: { type: 'string', format: 'binary' },
+        title: { type: 'string' },
+        category: { type: 'string' },
       },
       required: ['file'],
     },
@@ -82,8 +76,8 @@ export class GalleryController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   uploadImage(
-    @UploadedFile() file: Express.Multer.File, // ใช้ type จาก @types/multer
-    @Body() galleryData: CreateGalleryDto,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() galleryData: CreateGalleryUploadDto, // Use new DTO
   ) {
     return this.galleryService.uploadImage(file, galleryData);
   }

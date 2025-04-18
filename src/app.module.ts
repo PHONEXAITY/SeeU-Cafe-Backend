@@ -1,5 +1,4 @@
-// src/app.module.ts
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { CacheModule } from '@nestjs/cache-manager';
@@ -25,6 +24,9 @@ import { GalleryModule } from './gallery/gallery.module';
 import { SlideshowModule } from './slideshow/slideshow.module';
 import { SettingsModule } from './settings/settings.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { CustomerNotificationsModule } from './customer-notifications/customer-notifications.module';
+import { SessionModule } from './session/session.module';
+import { UserActivityMiddleware } from './session/user-activity.middleware';
 //import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -66,6 +68,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     ProductsModule,
     CategoriesModule,
     OrdersModule,
+    CustomerNotificationsModule,
     PaymentsModule,
     PromotionsModule,
     EmployeesModule,
@@ -77,6 +80,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     SlideshowModule,
     SettingsModule,
     CloudinaryModule,
+    SessionModule,
   ],
   providers: [
     {
@@ -85,4 +89,10 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(UserActivityMiddleware)
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
+  }
+}

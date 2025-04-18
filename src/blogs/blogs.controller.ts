@@ -54,15 +54,52 @@ export class BlogsController {
     type: Number,
     description: 'Filter by category ID',
   })
-  @ApiResponse({ status: 200, description: 'List of blog posts' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    description: 'Sort field (e.g., created_at)',
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    description: 'Sort order (asc, desc)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of blog posts with pagination',
+  })
   findAll(
     @Query('status') status?: string,
     @Query('categoryId') categoryId?: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('sort') sort: string = 'created_at',
+    @Query('order') order: 'asc' | 'desc' = 'desc',
   ) {
-    return this.blogsService.findAll(
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 10;
+    const categoryIdNum = categoryId ? parseInt(categoryId, 10) : undefined;
+
+    return this.blogsService.findAll({
       status,
-      categoryId ? +categoryId : undefined,
-    );
+      categoryId: categoryIdNum,
+      page: pageNum,
+      limit: limitNum,
+      sort,
+      order,
+    });
   }
 
   @Get(':id')

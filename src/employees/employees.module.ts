@@ -3,9 +3,10 @@ import { EmployeesService } from './employees.service';
 import { EmployeesController } from './employees.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [PrismaModule, CloudinaryModule],
+  imports: [PrismaModule, CloudinaryModule, DocumentsModule],
   controllers: [EmployeesController],
   providers: [EmployeesService],
   exports: [EmployeesService],

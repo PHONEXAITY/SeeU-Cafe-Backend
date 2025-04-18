@@ -3,17 +3,28 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Inject,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
+import { Promotion } from '@prisma/client';
+import {
+  PromotionValidationResult,
+  PromotionWithStringId,
+  PromotionWithRelations,
+} from './types/promotions.types';
 
 @Injectable()
 export class PromotionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {}
 
   async create(createPromotionDto: CreatePromotionDto) {
-    // Check if promotion with the same code already exists
     const existingPromotion = await this.prisma.promotion.findUnique({
       where: { code: createPromotionDto.code },
     });
@@ -24,7 +35,6 @@ export class PromotionsService {
       );
     }
 
-    // Validate dates
     if (
       new Date(createPromotionDto.start_date) >=
       new Date(createPromotionDto.end_date)
@@ -32,7 +42,6 @@ export class PromotionsService {
       throw new BadRequestException('End date must be after start date');
     }
 
-    // Generate a unique promotion_id
     const promotionId = BigInt(Date.now());
 
     const promotion = await this.prisma.promotion.create({
@@ -42,7 +51,8 @@ export class PromotionsService {
       },
     });
 
-    // แปลง promotion_id เป็น string
+    await this.clearPromotionCaches();
+
     return {
       ...promotion,
       promotion_id: promotion.promotion_id.toString(),
@@ -50,6 +60,16 @@ export class PromotionsService {
   }
 
   async findAll(status?: string) {
+    const cacheKey = `promotions:all:${status || 'all'}`;
+
+    const cachedPromotions =
+      await this.cacheManager.get<Array<Promotion & { promotion_id: string }>>(
+        cacheKey,
+      );
+    if (cachedPromotions) {
+      return cachedPromotions;
+    }
+
     const where = status ? { status } : {};
 
     const promotions = await this.prisma.promotion.findMany({
@@ -57,14 +77,25 @@ export class PromotionsService {
       orderBy: [{ status: 'asc' }, { end_date: 'desc' }],
     });
 
-    // แปลง promotion_id เป็น string ในทุก object
-    return promotions.map((promotion) => ({
+    const result = promotions.map((promotion) => ({
       ...promotion,
       promotion_id: promotion.promotion_id.toString(),
     }));
+
+    await this.cacheManager.set(cacheKey, result, 600);
+
+    return result;
   }
 
   async findOne(id: number) {
+    const cacheKey = `promotion:id:${id}`;
+    const cachedPromotion = await this.cacheManager.get<
+      PromotionWithRelations & { promotion_id: string }
+    >(cacheKey);
+    if (cachedPromotion) {
+      return cachedPromotion;
+    }
+
     const promotion = await this.prisma.promotion.findUnique({
       where: { id },
       include: {
@@ -88,14 +119,25 @@ export class PromotionsService {
       throw new NotFoundException(`Promotion with ID ${id} not found`);
     }
 
-    // แปลง promotion_id เป็น string
-    return {
+    const result = {
       ...promotion,
       promotion_id: promotion.promotion_id.toString(),
     };
+
+    await this.cacheManager.set(cacheKey, result, 600);
+
+    return result;
   }
 
   async findByCode(code: string) {
+    const cacheKey = `promotion:code:${code}`;
+    const cachedPromotion = await this.cacheManager.get<
+      PromotionWithRelations & { promotion_id: string }
+    >(cacheKey);
+    if (cachedPromotion) {
+      return cachedPromotion;
+    }
+
     const promotion = await this.prisma.promotion.findUnique({
       where: { code },
       include: {
@@ -119,11 +161,14 @@ export class PromotionsService {
       throw new NotFoundException(`Promotion with code '${code}' not found`);
     }
 
-    // แปลง promotion_id เป็น string
-    return {
+    const result = {
       ...promotion,
       promotion_id: promotion.promotion_id.toString(),
     };
+
+    await this.cacheManager.set(cacheKey, result, 600);
+
+    return result;
   }
 
   async update(id: number, updatePromotionDto: UpdatePromotionDto) {
@@ -141,7 +186,6 @@ export class PromotionsService {
       }
     }
 
-    // If dates are being updated, validate them
     if (updatePromotionDto.start_date && updatePromotionDto.end_date) {
       if (
         new Date(updatePromotionDto.start_date) >=
@@ -180,7 +224,13 @@ export class PromotionsService {
       data: updatePromotionDto,
     });
 
-    // แปลง promotion_id เป็น string
+    await this.clearPromotionCaches();
+
+    await this.cacheManager.del(`promotion:id:${id}`);
+    if (updatedPromotion.code) {
+      await this.cacheManager.del(`promotion:code:${updatedPromotion.code}`);
+    }
+
     return {
       ...updatedPromotion,
       promotion_id: updatedPromotion.promotion_id.toString(),
@@ -188,10 +238,8 @@ export class PromotionsService {
   }
 
   async remove(id: number) {
-    // Check if promotion exists
-    await this.findOne(id);
+    const promotion = await this.findOne(id);
 
-    // Check if promotion has associated orders
     const ordersCount = await this.prisma.order.count({
       where: { promotion_id: id },
     });
@@ -202,29 +250,43 @@ export class PromotionsService {
       );
     }
 
-    // Delete promotion usages first
     await this.prisma.promotionUsage.deleteMany({
       where: { promotion_id: id },
     });
 
-    // Delete the promotion
     await this.prisma.promotion.delete({
       where: { id },
     });
 
+    await this.clearPromotionCaches();
+
+    await this.cacheManager.del(`promotion:id:${id}`);
+    if (promotion.code) {
+      await this.cacheManager.del(`promotion:code:${promotion.code}`);
+    }
+
     return { message: 'Promotion deleted successfully' };
   }
 
-  async validatePromotion(code: string, userId?: number, amount?: number) {
+  async validatePromotion(
+    code: string,
+    userId?: number,
+    amount?: number,
+  ): Promise<PromotionValidationResult> {
     try {
+      const cacheKey = `promotion:validate:${code}:${userId || 'guest'}:${amount || 0}`;
+      const cachedValidation =
+        await this.cacheManager.get<PromotionValidationResult>(cacheKey);
+      if (cachedValidation) {
+        return cachedValidation;
+      }
+
       const promotion = await this.findByCode(code);
 
-      // Check if promotion is active
       if (promotion.status !== 'active') {
         return { valid: false, message: 'Promotion is not active' };
       }
 
-      // Check dates
       const now = new Date();
       if (
         now < new Date(promotion.start_date) ||
@@ -233,10 +295,9 @@ export class PromotionsService {
         return { valid: false, message: 'Promotion is not currently valid' };
       }
 
-      // Check minimum order amount
       if (
-        amount &&
-        promotion.minimum_order &&
+        amount !== undefined &&
+        promotion.minimum_order !== null &&
         amount < promotion.minimum_order
       ) {
         return {
@@ -245,8 +306,7 @@ export class PromotionsService {
         };
       }
 
-      // Check usage limit
-      if (promotion.usage_limit) {
+      if (promotion.usage_limit !== null) {
         const usageCount = promotion.promotionUsages.length;
         if (usageCount >= promotion.usage_limit) {
           return {
@@ -256,8 +316,7 @@ export class PromotionsService {
         }
       }
 
-      // Check if user has already used this promotion
-      if (userId) {
+      if (userId !== undefined) {
         const userUsage = promotion.promotionUsages.find(
           (usage) => usage.user_id === userId,
         );
@@ -269,13 +328,12 @@ export class PromotionsService {
         }
       }
 
-      // Calculate discount amount
       let discountAmount = 0;
-      if (amount) {
+      if (amount !== undefined) {
         if (promotion.discount_type === 'percentage') {
           discountAmount = (amount * promotion.discount_value) / 100;
           if (
-            promotion.maximum_discount &&
+            promotion.maximum_discount !== null &&
             discountAmount > promotion.maximum_discount
           ) {
             discountAmount = promotion.maximum_discount;
@@ -285,18 +343,33 @@ export class PromotionsService {
         }
       }
 
-      // แปลง promotion_id เป็น string ใน response
-      return {
+      const promotionWithStringId: PromotionWithStringId = {
+        ...promotion,
+        promotion_id: promotion.promotion_id.toString(),
+      };
+
+      const result: PromotionValidationResult = {
         valid: true,
-        promotion: {
-          ...promotion,
-          promotion_id: promotion.promotion_id.toString(),
-        },
+        promotion: promotionWithStringId,
         discountAmount,
         message: 'Promotion is valid',
       };
+
+      await this.cacheManager.set(cacheKey, result, 300);
+
+      return result;
     } catch (error) {
-      return { valid: false, message: error.message };
+      return {
+        valid: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
+  }
+
+  private async clearPromotionCaches() {
+    await this.cacheManager.del(`promotions:all:all`);
+    await this.cacheManager.del(`promotions:all:active`);
+    await this.cacheManager.del(`promotions:all:inactive`);
+    await this.cacheManager.del(`promotions:all:expired`);
   }
 }

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateGalleryDto } from './dto/create-gallery.dto';
+import { CreateGalleryUploadDto } from './dto/create-gallery-upload.dto'; // Import new DTO
 import { UpdateGalleryDto } from './dto/update-gallery.dto';
 
 @Injectable()
@@ -17,16 +18,15 @@ export class GalleryService {
     });
   }
 
-  async uploadImage(file: Express.Multer.File, galleryData: CreateGalleryDto) {
-    // Upload file to Cloudinary
+  async uploadImage(
+    file: Express.Multer.File,
+    galleryData: CreateGalleryUploadDto,
+  ) {
     const result = await this.cloudinaryService.uploadFile(file, 'gallery');
-
-    // Create gallery item with uploaded image
     const data = {
       ...galleryData,
       image: result.secure_url,
     };
-
     return this.prisma.gallery.create({
       data,
     });
@@ -75,7 +75,6 @@ export class GalleryService {
   }
 
   async update(id: number, updateGalleryDto: UpdateGalleryDto) {
-    // Check if gallery item exists
     await this.findOne(id);
 
     return this.prisma.gallery.update({
@@ -89,19 +88,15 @@ export class GalleryService {
     file: Express.Multer.File,
     updateData?: UpdateGalleryDto,
   ) {
-    // Check if gallery item exists
     const gallery = await this.findOne(id);
 
-    // Upload new image to Cloudinary
     const result = await this.cloudinaryService.uploadFile(file, 'gallery');
 
-    // Prepare update data
     const data = {
       ...(updateData || {}),
       image: result.secure_url,
     };
 
-    // Delete old image from Cloudinary if possible
     if (
       gallery.image.includes('cloudinary') &&
       gallery.image.includes('/upload/')
@@ -109,9 +104,8 @@ export class GalleryService {
       try {
         const urlParts = gallery.image.split('/');
         const publicIdWithExtension = urlParts[urlParts.length - 1];
-        const publicId = publicIdWithExtension.split('.')[0]; // Remove file extension
+        const publicId = publicIdWithExtension.split('.')[0];
 
-        // Delete from Cloudinary (this is optional and can fail silently)
         await this.cloudinaryService.deleteFile(publicId).catch(() => {
           console.log(`Could not delete file from Cloudinary: ${publicId}`);
         });
@@ -120,7 +114,6 @@ export class GalleryService {
       }
     }
 
-    // Update gallery item
     return this.prisma.gallery.update({
       where: { id },
       data,
@@ -128,10 +121,8 @@ export class GalleryService {
   }
 
   async remove(id: number) {
-    // Check if gallery item exists and get image URL
     const gallery = await this.findOne(id);
 
-    // Extract public ID from Cloudinary URL if applicable
     if (
       gallery.image.includes('cloudinary') &&
       gallery.image.includes('/upload/')
@@ -139,9 +130,8 @@ export class GalleryService {
       try {
         const urlParts = gallery.image.split('/');
         const publicIdWithExtension = urlParts[urlParts.length - 1];
-        const publicId = publicIdWithExtension.split('.')[0]; // Remove file extension
+        const publicId = publicIdWithExtension.split('.')[0];
 
-        // Delete from Cloudinary (this is optional and can fail silently)
         await this.cloudinaryService.deleteFile(publicId).catch(() => {
           console.log(`Could not delete file from Cloudinary: ${publicId}`);
         });
@@ -150,7 +140,6 @@ export class GalleryService {
       }
     }
 
-    // Delete from database
     await this.prisma.gallery.delete({
       where: { id },
     });

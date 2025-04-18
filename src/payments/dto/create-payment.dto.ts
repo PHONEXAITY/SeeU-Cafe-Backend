@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsDateString,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 enum PaymentMethod {
   CASH = 'cash',
@@ -16,6 +17,7 @@ enum PaymentMethod {
   DEBIT_CARD = 'debit_card',
   MOBILE_PAYMENT = 'mobile_payment',
   BANK_TRANSFER = 'bank_transfer',
+  QR_CODE = 'qr_code',
   OTHER = 'other',
 }
 
@@ -44,6 +46,7 @@ export class CreatePaymentDto {
   @IsNumber()
   @Min(0)
   @IsNotEmpty()
+  @Type(() => Number)
   amount: number;
 
   @ApiProperty({
@@ -82,4 +85,21 @@ export class CreatePaymentDto {
   @IsInt()
   @IsOptional()
   delivery_id?: number;
+
+  @ApiPropertyOptional({
+    description: 'Transaction reference number (for online payments)',
+    example: 'TRX123456789',
+  })
+  @IsString()
+  @IsOptional()
+  transaction_reference?: string;
+
+  @ApiPropertyOptional({
+    description: 'Additional payment notes or information',
+    example:
+      'Customer paid with an expired card initially, then used another card',
+  })
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }

@@ -12,9 +12,11 @@ export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createPaymentDto: CreatePaymentDto) {
-    // Check if order exists
     const order = await this.prisma.order.findUnique({
       where: { id: createPaymentDto.order_id },
+      include: {
+        user: true,
+      },
     });
 
     if (!order) {
@@ -23,7 +25,6 @@ export class PaymentsService {
       );
     }
 
-    // Check if the payment amount matches or exceeds the order total
     if (
       createPaymentDto.amount <
       order.total_price - (order.discount_amount || 0)
@@ -33,7 +34,6 @@ export class PaymentsService {
       );
     }
 
-    // If delivery_id is provided, check if it exists
     if (createPaymentDto.delivery_id) {
       const delivery = await this.prisma.delivery.findUnique({
         where: { id: createPaymentDto.delivery_id },
@@ -46,7 +46,6 @@ export class PaymentsService {
       }
     }
 
-    // Generate a unique payment_id
     const paymentId = BigInt(Date.now());
 
     const payment = await this.prisma.payment.create({
@@ -56,15 +55,33 @@ export class PaymentsService {
       },
     });
 
-    // If payment status is 'completed', update the order status to 'paid'
     if (payment.status === 'completed') {
       await this.prisma.order.update({
         where: { id: createPaymentDto.order_id },
-        data: { status: 'paid' },
+        data: { status: 'completed' },
       });
+
+      await this.prisma.orderTimeline.create({
+        data: {
+          order_id: createPaymentDto.order_id,
+          status: 'paid',
+          notes: 'Payment completed',
+        },
+      });
+
+      if (order.User_id) {
+        await this.prisma.customerNotification.create({
+          data: {
+            user_id: order.User_id,
+            order_id: order.id,
+            message: `Your payment of ${payment.amount.toFixed(2)} for order #${order.order_id} has been received.`,
+            type: 'order_update',
+            action_url: `/orders/${order.order_id}`,
+          },
+        });
+      }
     }
 
-    // แปลง payment_id เป็น string
     return {
       ...payment,
       payment_id: payment.payment_id.toString(),
@@ -84,7 +101,6 @@ export class PaymentsService {
       },
     });
 
-    // แปลง payment_id เป็น string ในทุก object
     return payments.map((payment) => ({
       ...payment,
       payment_id: payment.payment_id.toString(),
@@ -103,7 +119,6 @@ export class PaymentsService {
       throw new NotFoundException(`Payment with ID ${id} not found`);
     }
 
-    // แปลง payment_id เป็น string
     return {
       ...payment,
       payment_id: payment.payment_id.toString(),
@@ -111,10 +126,9 @@ export class PaymentsService {
   }
 
   async update(id: number, updatePaymentDto: UpdatePaymentDto) {
-    // Check if payment exists
-    await this.findOne(id);
+    const existingPayment = await this.findOne(id);
+    const previousStatus = existingPayment.status;
 
-    // If order_id is being updated, check if the new order exists
     if (updatePaymentDto.order_id) {
       const order = await this.prisma.order.findUnique({
         where: { id: updatePaymentDto.order_id },
@@ -127,7 +141,6 @@ export class PaymentsService {
       }
     }
 
-    // If delivery_id is being updated, check if the new delivery exists
     if (updatePaymentDto.delivery_id) {
       const delivery = await this.prisma.delivery.findUnique({
         where: { id: updatePaymentDto.delivery_id },
@@ -144,19 +157,69 @@ export class PaymentsService {
       where: { id },
       data: updatePaymentDto,
       include: {
-        order: true,
+        order: {
+          include: {
+            user: true,
+          },
+        },
       },
     });
 
-    // If payment status is updated to 'completed', update the order status to 'paid'
-    if (updatePaymentDto.status === 'completed') {
+    if (
+      updatePaymentDto.status === 'completed' &&
+      previousStatus !== 'completed'
+    ) {
       await this.prisma.order.update({
         where: { id: payment.order_id },
-        data: { status: 'paid' },
+        data: { status: 'completed' },
       });
+
+      await this.prisma.orderTimeline.create({
+        data: {
+          order_id: payment.order_id,
+          status: 'completed',
+          notes: 'Payment completed',
+        },
+      });
+
+      if (payment.order.User_id) {
+        await this.prisma.customerNotification.create({
+          data: {
+            user_id: payment.order.User_id,
+            order_id: payment.order_id,
+            message: `Your payment of ${payment.amount.toFixed(2)} for order #${payment.order.order_id} has been received.`,
+            type: 'order_update',
+            action_url: `/orders/${payment.order.order_id}`,
+          },
+        });
+      }
     }
 
-    // แปลง payment_id เป็น string
+    if (
+      updatePaymentDto.status === 'refunded' &&
+      previousStatus !== 'refunded'
+    ) {
+      await this.prisma.orderTimeline.create({
+        data: {
+          order_id: payment.order_id,
+          status: 'refunded',
+          notes: 'Payment refunded',
+        },
+      });
+
+      if (payment.order.User_id) {
+        await this.prisma.customerNotification.create({
+          data: {
+            user_id: payment.order.User_id,
+            order_id: payment.order_id,
+            message: `Your payment of ${payment.amount.toFixed(2)} for order #${payment.order.order_id} has been refunded.`,
+            type: 'refunded',
+            action_url: `/orders/${payment.order.order_id}`,
+          },
+        });
+      }
+    }
+
     return {
       ...payment,
       payment_id: payment.payment_id.toString(),
@@ -164,26 +227,70 @@ export class PaymentsService {
   }
 
   async updateStatus(id: number, status: string) {
-    // Check if payment exists
     const payment = await this.findOne(id);
+    const previousStatus = payment.status;
 
     const updatedPayment = await this.prisma.payment.update({
       where: { id },
       data: { status },
       include: {
-        order: true,
+        order: {
+          include: {
+            user: true,
+          },
+        },
       },
     });
 
-    // If payment status is updated to 'completed', update the order status to 'paid'
-    if (status === 'completed') {
+    if (status === 'completed' && previousStatus !== 'completed') {
       await this.prisma.order.update({
         where: { id: payment.order_id },
-        data: { status: 'paid' },
+        data: { status: 'completed' },
       });
+
+      await this.prisma.orderTimeline.create({
+        data: {
+          order_id: payment.order_id,
+          status: 'completed',
+          notes: 'Payment completed',
+        },
+      });
+
+      if (updatedPayment.order.User_id) {
+        await this.prisma.customerNotification.create({
+          data: {
+            user_id: updatedPayment.order.User_id,
+            order_id: updatedPayment.order_id,
+            message: `Your payment of ${payment.amount.toFixed(2)} for order #${payment.order.order_id} has been received.`,
+            type: 'order_update',
+            action_url: `/orders/${updatedPayment.order.order_id}`,
+          },
+        });
+      }
     }
 
-    // แปลง payment_id เป็น string
+    if (status === 'refunded' && previousStatus !== 'refunded') {
+      await this.prisma.orderTimeline.create({
+        data: {
+          order_id: payment.order_id,
+          status: 'refunded',
+          notes: 'Payment refunded',
+        },
+      });
+
+      if (updatedPayment.order.User_id) {
+        await this.prisma.customerNotification.create({
+          data: {
+            user_id: updatedPayment.order.User_id,
+            order_id: updatedPayment.order_id,
+            message: `Your payment of ${updatedPayment.amount.toFixed(2)} for order #${updatedPayment.order.order_id} has been refunded.`,
+            type: 'refunded',
+            action_url: `/orders/${updatedPayment.order.order_id}`,
+          },
+        });
+      }
+    }
+
     return {
       ...updatedPayment,
       payment_id: updatedPayment.payment_id.toString(),
@@ -191,7 +298,6 @@ export class PaymentsService {
   }
 
   async remove(id: number) {
-    // Check if payment exists
     await this.findOne(id);
 
     await this.prisma.payment.delete({

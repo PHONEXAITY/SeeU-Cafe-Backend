@@ -1,54 +1,84 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsNotEmpty,
   IsString,
-  IsUrl,
   IsOptional,
-  IsInt,
-  Min,
+  IsNumber,
+  IsEnum,
+  IsDateString,
+  IsNotEmpty,
 } from 'class-validator';
 
 export class CreateSlideshowDto {
-  @ApiProperty({
-    description: 'Title of the slideshow item',
-    example: 'Summer Promotion',
-  })
+  @ApiProperty({ description: 'Slide title' })
   @IsString()
   @IsNotEmpty()
   title: string;
 
+  @ApiProperty({ description: 'Slide subtitle', required: false })
+  @IsString()
+  @IsOptional()
+  subtitle?: string;
+
   @ApiProperty({
-    description: 'Image URL for the slideshow',
-    example: 'https://res.cloudinary.com/your-cloud/image/upload/slide1.jpg',
-  })
-  @IsUrl()
-  @IsNotEmpty()
-  image: string;
-
-  @ApiPropertyOptional({
-    description: 'Link URL when the slide is clicked',
-    example: 'https://seeu.cafe/promotions/summer',
-  })
-  @IsUrl()
-  @IsOptional()
-  link?: string;
-
-  @ApiPropertyOptional({
-    description: 'Display order of the slide (lower numbers appear first)',
-    example: 1,
-    default: 0,
-  })
-  @IsInt()
-  @Min(0)
-  @IsOptional()
-  order?: number;
-
-  @ApiPropertyOptional({
-    description: 'Status of the slide',
-    example: 'active',
-    default: 'active',
+    description: 'Image URL (will be populated from upload)',
+    required: false,
   })
   @IsString()
   @IsOptional()
+  image?: string;
+
+  @ApiProperty({ description: 'Link URL', required: false })
+  @IsString()
+  @IsOptional()
+  link?: string;
+
+  @ApiProperty({ description: 'Display order', required: false, default: 0 })
+  @IsNumber()
+  @IsOptional()
+  order?: number;
+
+  @ApiProperty({
+    description: 'Slide status',
+    enum: ['active', 'inactive', 'scheduled'],
+    default: 'active',
+  })
+  @IsEnum(['active', 'inactive', 'scheduled'])
+  @IsOptional()
   status?: string;
+
+  @ApiProperty({ description: 'Button text', required: false })
+  @IsString()
+  @IsOptional()
+  buttonText?: string;
+
+  @ApiProperty({ description: 'Button link URL', required: false })
+  @IsString()
+  @IsOptional()
+  buttonLink?: string;
+
+  @ApiProperty({
+    description: 'Button target',
+    enum: ['_self', '_blank'],
+    default: '_self',
+    required: false,
+  })
+  @IsEnum(['_self', '_blank'])
+  @IsOptional()
+  buttonTarget?: string;
+
+  @ApiProperty({
+    description: 'Start date for scheduled slides',
+    required: false,
+  })
+  @IsDateString()
+  @IsOptional()
+  startDate?: Date | string;
+
+  @ApiProperty({
+    description: 'End date for scheduled slides',
+    required: false,
+  })
+  @IsDateString()
+  @IsOptional()
+  endDate?: Date | string;
 }

@@ -9,10 +9,12 @@ import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SessionModule } from '../session/session.module';
 
 @Module({
   imports: [
     UsersModule,
+    SessionModule,
     PrismaModule,
     PassportModule,
     JwtModule.registerAsync({

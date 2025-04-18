@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
+import { PromotionValidationResult } from './types/promotions.types';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -76,7 +77,7 @@ export class PromotionsController {
     @Body('code') code: string,
     @Body('userId') userId?: number,
     @Body('amount') amount?: number,
-  ) {
+  ): Promise<PromotionValidationResult> {
     return this.promotionsService.validatePromotion(code, userId, amount);
   }
 

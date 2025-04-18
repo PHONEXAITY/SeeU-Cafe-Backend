@@ -1,4 +1,3 @@
-// src/auth/auth.controller.ts
 import {
   Controller,
   Post,
@@ -10,7 +9,7 @@ import {
   HttpStatus,
   Res,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Response, Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CreateUserDto } from '../users/dto/create-user.dto';
@@ -24,7 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { UserPayload } from './strategies/jwt.strategy';
 
-interface RequestWithUser extends Request {
+interface RequestWithUser extends ExpressRequest {
   user: UserPayload;
 }
 
@@ -60,13 +59,16 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout' })
   @ApiResponse({ status: 200, description: 'Logout successful' })
-  logout(@Res({ passthrough: true }) response: Response) {
-    return this.authService.logout(response);
+  logout(
+    @Res({ passthrough: true }) response: Response,
+    @Request() request: ExpressRequest,
+  ) {
+    return this.authService.logout(response, request);
   }
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  @ApiCookieAuth() // Update Swagger to show cookie authentication
+  @ApiCookieAuth()
   @ApiOperation({ summary: 'Get user profile' })
   @ApiResponse({ status: 200, description: 'Profile returned successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -80,7 +82,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify JWT token' })
   @ApiResponse({ status: 200, description: 'Token is valid' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  verifyToken(@Request() req) {
+  verifyToken(@Request() req: RequestWithUser) {
     return { valid: true, user: req.user };
   }
 }

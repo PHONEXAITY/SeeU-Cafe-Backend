@@ -7,301 +7,443 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Role model
 model Role {
-  id          Int       @id @default(autoincrement())
-  name        String    @unique
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
   description String?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-  users       User[]    // ความสัมพันธ์แบบ one-to-many กับผู้ใช้
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  users       User[]
 }
 
-// User model (ปรับปรุงแล้ว)
 model User {
-  id                Int                @id @default(autoincrement())
-  email             String             @unique
-  password          String
-  phone             String?
-  address           String?
-  first_name        String?
-  last_name         String?
-  User_id           BigInt             @unique
-  role_id           Int?               // เพิ่มฟิลด์อ้างอิงโดยตรงถึงบทบาท
-  role              Role?              @relation(fields: [role_id], references: [id]) // สร้างความสัมพันธ์กับตาราง Role
-  created_at        DateTime           @default(now())
-  updated_at        DateTime           @updatedAt
-  orders            Order[]
-  reviews           Review[]
-  profile_photo     String?
-  documents         Document[]
-  account_number    String?            @unique
-  bank_name         String?
-  promotionUsages   PromotionUsage[]
-  userActivities    UserActivity[]
+  id              Int                    @id @default(autoincrement())
+  email           String                 @unique
+  password        String
+  phone           String?
+  address         String?
+  first_name      String?
+  last_name       String?
+  User_id         BigInt                 @unique
+  created_at      DateTime               @default(now())
+  updated_at      DateTime               @updatedAt
+  profile_photo   String?
+  account_number  String?                @unique
+  bank_name       String?
+  role_id         Int?
+  notifications   CustomerNotification[]
+  documents       Document[]
+  orders          Order[]
+  orderHistories  OrderHistory[]
+  promotionUsages PromotionUsage[]
+  reviews         Review[]
+  role            Role?                  @relation(fields: [role_id], references: [id])
+  userActivities  UserActivity[]
 }
 
-// Employee model
 model Employee {
-  id                Int       @id @default(autoincrement())
-  first_name        String
-  last_name         String
-  email             String    @unique
-  phone             String?
-  address           String?
-  position          String
-  salary            Float?
-  Employee_id       BigInt       @unique
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  profile_photo     String?
-  documents         String?
-  date_of_birth     DateTime?
-  gender            String?
-  orders            Order[]
-  delivery          Delivery[]
+  id            Int        @id @default(autoincrement())
+  first_name    String
+  last_name     String
+  email         String     @unique
+  phone         String?
+  address       String?
+  position      String
+  salary        Float?
+  Employee_id   BigInt     @unique
+  created_at    DateTime   @default(now())
+  updated_at    DateTime   @updatedAt
+  profile_photo String?
+  date_of_birth DateTime?
+  gender        String?
+  status        String     @default("active")
+  delivery      Delivery[]
+  documents     Document[]
+  orders        Order[]
 }
 
-// Remaining models stay the same...
-// Table model
-model Table {
-  id               Int       @id @default(autoincrement())
-  number           Int       @unique
-  capacity         Int
-  status           String    @default("available")
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
-  table_id         BigInt       @unique
-  orders           Order[]
-}
-
-// Orders model
 model Order {
-  id               Int           @id @default(autoincrement())
-  order_id         String        @unique
-  create_at        DateTime      @default(now())
-  status           String        @default("pending")
-  total_price      Float
-  User_id          Int?
-  user             User?         @relation(fields: [User_id], references: [id])
-  Employee_id      Int?
-  employee         Employee?     @relation(fields: [Employee_id], references: [id])
-  table_id         Int?
-  table            Table?        @relation(fields: [table_id], references: [id])
-  promotion_id     Int?
-  promotion        Promotion?    @relation(fields: [promotion_id], references: [id])
-  order_details    OrderDetail[]
-  payments         Payment[]
-  delivery         Delivery?
-  discount_amount  Float?        @default(0)
-  used_at          DateTime?
+  id                   Int             @id @default(autoincrement())
+  order_id             String          @unique
+  create_at            DateTime        @default(now())
+  status               String          @default("pending")
+  total_price          Float
+  User_id              Int?
+  Employee_id          Int?
+  table_id             Int?
+  promotion_id         Int?
+  discount_amount      Float?          @default(0)
+  used_at              DateTime?
+  actual_ready_time    DateTime?
+  estimated_ready_time DateTime?
+  order_type           String
+  pickup_code          String?
+  pickup_time          DateTime?
+  preparation_notes    String?
+  delivery             Delivery?
+  employee             Employee?       @relation(fields: [Employee_id], references: [id])
+  user                 User?           @relation(fields: [User_id], references: [id])
+  promotion            Promotion?      @relation(fields: [promotion_id], references: [id])
+  table                Table?          @relation(fields: [table_id], references: [id])
+  order_details        OrderDetail[]
+  timeline             OrderTimeline[]
+  payments             Payment[]
+  time_updates         TimeUpdate[]
+
+  @@index([status])
+  @@index([User_id])
+  @@index([order_type])
 }
 
-// OrderDetail model
+model TimeUpdate {
+  id                Int       @id @default(autoincrement())
+  order_id          Int
+  previous_time     DateTime?
+  new_time          DateTime
+  reason            String?
+  updated_by        Int?
+  created_at        DateTime  @default(now())
+  notified_customer Boolean   @default(false)
+  order             Order     @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+}
+
+model Delivery {
+  id                       Int       @id @default(autoincrement())
+  order_id                 Int       @unique
+  status                   String    @default("pending")
+  delivery_id              BigInt    @unique
+  delivery_address         String?
+  carrier_id               Int?
+  employee_id              Int?
+  actual_delivery_time     DateTime?
+  customer_note            String?
+  delivery_fee             Float?
+  estimated_delivery_time  DateTime?
+  pickup_from_kitchen_time DateTime?
+  employee                 Employee? @relation(fields: [employee_id], references: [id])
+  order                    Order     @relation(fields: [order_id], references: [id])
+
+  @@index([status])
+  @@index([employee_id])
+}
+
 model OrderDetail {
-  id               Int       @id @default(autoincrement())
+  id               Int           @id @default(autoincrement())
   order_id         Int
-  order            Order     @relation(fields: [order_id], references: [id])
   food_menu_id     Int?
-  food_menu        FoodMenu? @relation(fields: [food_menu_id], references: [id])
   beverage_menu_id Int?
-  beverage_menu    BeverageMenu? @relation(fields: [beverage_menu_id], references: [id])
   quantity         Int
   price            Float
   notes            String?
   status_id        String?
+  is_ready         Boolean       @default(false)
+  preparation_time Int?
+  beverage_menu    BeverageMenu? @relation(fields: [beverage_menu_id], references: [id])
+  food_menu        FoodMenu?     @relation(fields: [food_menu_id], references: [id])
+  order            Order         @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+  @@index([food_menu_id])
+  @@index([beverage_menu_id])
 }
 
-// FoodMenu model
 model FoodMenu {
-  id               Int          @id @default(autoincrement())
-  name             String
-  description      String?
-  price            Float
-  category_id      Int
-  category         MenuCategory @relation(fields: [category_id], references: [id])
-  image            String?
-  status           String       @default("active")
-  Created_at       DateTime     @default(now())
-  items_id         Int?
-  orderDetails     OrderDetail[]
+  id           Int           @id @default(autoincrement())
+  name         String
+  description  String?
+  price        Float
+  category_id  Int
+  image        String?
+  status       String        @default("active")
+  Created_at   DateTime      @default(now())
+  items_id     Int?
+  category     MenuCategory  @relation(fields: [category_id], references: [id])
+  orderDetails OrderDetail[]
+
+  @@index([category_id])
+  @@index([status])
 }
 
-// BeverageMenu model
 model BeverageMenu {
-  id               Int          @id @default(autoincrement())
-  name             String
-  description      String?
-  price            Float
-  category_id      Int
-  category         MenuCategory @relation(fields: [category_id], references: [id])
-  image            String?
-  status           String       @default("active")
-  menu_id          Int?
-  hot_price        Float?
-  ice_price        Float?
-  Created_at       DateTime     @default(now())
-  orderDetails     OrderDetail[]
+  id           Int           @id @default(autoincrement())
+  name         String
+  description  String?
+  price        Float
+  category_id  Int
+  image        String?
+  status       String        @default("active")
+  menu_id      Int?
+  hot_price    Float?
+  ice_price    Float?
+  Created_at   DateTime      @default(now())
+  category     MenuCategory  @relation(fields: [category_id], references: [id])
+  orderDetails OrderDetail[]
+
+  @@index([category_id])
+  @@index([status])
 }
 
-// MenuCategory model
 model MenuCategory {
-  id               Int            @id @default(autoincrement())
-  name             String
-  description      String?
-  image            String?
-  parent_id        Int?
-  status           String         @default("active")
-  category_id      BigInt            @unique
-  type             String
-  foodMenus        FoodMenu[]
-  beverageMenus    BeverageMenu[]
+  id            Int            @id @default(autoincrement())
+  name          String
+  description   String?
+  image         String?
+  parent_id     Int?
+  status        String         @default("active")
+  category_id   BigInt         @unique
+  type          String
+  beverageMenus BeverageMenu[]
+  foodMenus     FoodMenu[]
+
+  @@index([status])
+  @@index([type])
 }
 
-// Payment model
+model Table {
+  id                    Int       @id @default(autoincrement())
+  number                Int       @unique
+  capacity              Int
+  status                String    @default("available")
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  table_id              BigInt    @unique
+  current_session_start DateTime?
+  expected_end_time     DateTime?
+  orders                Order[]
+
+  @@index([status])
+}
+
 model Payment {
-  id               Int       @id @default(autoincrement())
-  order_id         Int
-  order            Order     @relation(fields: [order_id], references: [id])
-  payment_id       BigInt       @unique
-  amount           Float
-  method           String
-  payment_date     DateTime  @default(now())
-  status           String    @default("pending")
-  delivery_id      Int?
+  id           Int      @id @default(autoincrement())
+  order_id     Int
+  payment_id   BigInt   @unique
+  amount       Float
+  method       String
+  payment_date DateTime @default(now())
+  status       String   @default("pending")
+  delivery_id  Int?
+  order        Order    @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+  @@index([status])
 }
 
-// Promotion model
 model Promotion {
-  id               Int       @id @default(autoincrement())
-  name             String
-  code             String    @unique
-  discount_type    String
-  discount_value   Float
-  start_date       DateTime
-  end_date         DateTime
-  minimum_order    Float?
-  maximum_discount Float?
-  description      String?
-  created_at       DateTime  @default(now())
-  status           String    @default("active")
-  promotion_id     BigInt       @unique
-  usage_limit      Int?
+  id                 Int              @id @default(autoincrement())
+  name               String
+  code               String           @unique
+  discount_type      String
+  discount_value     Float
+  start_date         DateTime
+  end_date           DateTime
+  minimum_order      Float?
+  maximum_discount   Float?
+  description        String?
+  created_at         DateTime         @default(now())
+  status             String           @default("active")
+  promotion_id       BigInt           @unique
+  usage_limit        Int?
   product_categories String?
-  orders           Order[]
-  promotionUsages  PromotionUsage[]
+  orders             Order[]
+  promotionUsages    PromotionUsage[]
+
+  @@index([status])
+  @@index([start_date, end_date])
 }
 
-// PromotionUsage model
 model PromotionUsage {
-  id               Int       @id @default(autoincrement())
-  promotion_id     Int
-  promotion        Promotion @relation(fields: [promotion_id], references: [id])
-  user_id          Int
-  user             User      @relation(fields: [user_id], references: [id])
-  used_at          DateTime  @default(now())
-  created_at       DateTime  @default(now())
+  id           Int       @id @default(autoincrement())
+  promotion_id Int
+  user_id      Int
+  used_at      DateTime  @default(now())
+  created_at   DateTime  @default(now())
+  promotion    Promotion @relation(fields: [promotion_id], references: [id])
+  user         User      @relation(fields: [user_id], references: [id])
+
+  @@index([promotion_id])
+  @@index([user_id])
 }
 
-// Delivery model
-model Delivery {
-  id               Int       @id @default(autoincrement())
-  order_id         Int       @unique
-  order            Order     @relation(fields: [order_id], references: [id])
-  status           String    @default("pending")
-  delivery_id      BigInt       @unique
+model CustomerNotification {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  order_id   Int
+  message    String
+  type       String
+  created_at DateTime @default(now())
+  read       Boolean  @default(false)
+  action_url String?
+  user       User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([read])
+  @@index([type])
+}
+
+model OrderTimeline {
+  id          Int      @id @default(autoincrement())
+  order_id    Int
+  status      String
+  timestamp   DateTime @default(now())
+  employee_id Int?
+  notes       String?
+  order       Order    @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+  @@index([status])
+}
+
+model OrderHistory {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  order_id         String
+  order_date       DateTime
+  total_amount     Float
+  order_type       String
+  status           String
+  items            Json
+  created_at       DateTime @default(now())
+  payment_method   String?
   delivery_address String?
-  carrier_id       Int?
-  employee_id      Int?
-  employee         Employee?  @relation(fields: [employee_id], references: [id])
-  delivered_time   DateTime?
-  estimated_time   DateTime?
+  is_favorite      Boolean  @default(false)
+  reorder_count    Int      @default(0)
+  user             User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([order_id])
+  @@index([order_type])
+  @@index([is_favorite])
 }
 
-// Review model
 model Review {
-  id               Int       @id @default(autoincrement())
-  user_id          Int
-  user             User      @relation(fields: [user_id], references: [id])
-  rating           Int
-  comment          String?
-  created_at       DateTime  @default(now())
-  status           String    @default("pending")
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  rating     Int
+  comment    String?
+  created_at DateTime @default(now())
+  status     String   @default("pending")
+  user       User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([rating])
+  @@index([status])
 }
 
-// Document model
 model Document {
-  id               Int       @id @default(autoincrement())
-  user_id          Int
-  user             User      @relation(fields: [user_id], references: [id])
-  document_type    String
-  file_path        String
-  uploaded_at      DateTime  @default(now())
+  id            Int       @id @default(autoincrement())
+  user_id       Int?
+  document_type String
+  file_path     String
+  uploaded_at   DateTime  @default(now())
+  employee_id   Int?
+  employee      Employee? @relation(fields: [employee_id], references: [id])
+  user          User?     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([employee_id])
+  @@index([document_type])
 }
 
-// Blog model
 model Blog {
-  id               Int       @id @default(autoincrement())
-  title            String
-  content          String
-  author           String?
-  image            String?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
-  status           String    @default("draft")
-  categories       BlogCategory[]
-  slug             String    @unique
-  views            Int       @default(0)
+  id         Int            @id @default(autoincrement())
+  title      String
+  content    String
+  author     String?
+  image      String?
+  created_at DateTime       @default(now())
+  updated_at DateTime       @updatedAt
+  status     String         @default("draft")
+  slug       String         @unique
+  views      Int            @default(0)
+  categories BlogCategory[] @relation("BlogToBlogCategory")
+
+  @@index([status])
+  @@index([slug])
 }
 
-// BlogCategory model
 model BlogCategory {
-  id               Int       @id @default(autoincrement())
-  name             String
-  description      String?
-  blogs            Blog[]
-  slug             String    @unique
+  id          Int     @id @default(autoincrement())
+  name        String
+  description String?
+  slug        String  @unique
+  blogs       Blog[]  @relation("BlogToBlogCategory")
+
+  @@index([slug])
 }
 
-// Slideshow model
 model Slideshow {
-  id               Int       @id @default(autoincrement())
-  title            String
-  image            String
-  link             String?
-  order            Int       @default(0)
-  status           String    @default("active")
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  id           Int       @id @default(autoincrement())
+  title        String
+  subtitle     String?
+  image        String
+  link         String?
+  order        Int       @default(0)
+  status       String    @default("active")
+  buttonText   String?
+  buttonLink   String?
+  buttonTarget String?   @default("_self")
+  startDate    DateTime?
+  endDate      DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([order])
 }
 
-// Gallery model
+// เพิ่มโมเดลใหม่สำหรับการตั้งค่า slideshow
+model SlideshowSettings {
+  id                  Int     @id @default(autoincrement())
+  autoplay            Boolean @default(true)
+  interval            Int     @default(5000)
+  transition          String  @default("fade")
+  transitionDuration  Int     @default(500)
+  showArrows          Boolean @default(true)
+  showDots            Boolean @default(true)
+  pauseOnHover        Boolean @default(true)
+  height              Int     @default(600)
+  responsive          Boolean @default(true)
+  maxSlides           Int     @default(5)
+  enableOverlay       Boolean @default(true)
+  overlayColor        String  @default("rgba(0, 0, 0, 0.3)")
+  animateText         Boolean @default(true)
+  textPosition        String  @default("bottom")
+}
+
 model Gallery {
-  id               Int       @id @default(autoincrement())
-  title            String?
-  image            String
-  category         String?
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  id         Int      @id @default(autoincrement())
+  title      String?
+  image      String
+  category   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([category])
 }
 
-// SystemSettings model
 model SystemSettings {
-  id               Int       @id @default(autoincrement())
-  key              String    @unique
-  value            String
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  id         Int      @id @default(autoincrement())
+  key        String   @unique
+  value      String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([key])
 }
 
-// UserActivity model
 model UserActivity {
-  id               Int       @id @default(autoincrement())
-  user_id          Int
-  user             User      @relation(fields: [user_id], references: [id])
-  activity_type    String
-  description      String?
-  ip_address       String?
-  user_agent       String?
-  created_at       DateTime  @default(now())
+  id            Int      @id @default(autoincrement())
+  user_id       Int
+  activity_type String
+  description   String?
+  ip_address    String?
+  user_agent    String?
+  created_at    DateTime @default(now())
+  user          User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([activity_type])
 }

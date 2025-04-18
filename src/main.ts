@@ -5,17 +5,18 @@ import { AppModule } from './app.module';
 import * as compression from 'compression';
 import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Global prefix
+  app.use(bodyParser.json({ limit: '50mb' }));
+  app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+
   app.setGlobalPrefix('api');
 
-  // Use cookie parser
   app.use(cookieParser());
 
-  // Validation and transformation
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -30,19 +31,21 @@ async function bootstrap() {
   (BigInt.prototype as any).toJSON = function () {
     return (this as unknown as bigint).toString();
   };
-  // Security middleware
+
   app.use(helmet());
   app.use(compression());
 
-  // แก้ไข CORS configuration
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:3000'], // รองรับทั้ง frontend และ backend URL
-    credentials: true, // สำคัญมากสำหรับ cookie
+    origin: [
+      'http://localhost:3001',
+      'http://localhost:3000',
+      'http://localhost:3002',
+    ],
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
-  // Swagger documentation
   const config = new DocumentBuilder()
     .setTitle('SeeU Cafe API')
     .setDescription('The SeeU Cafe ordering system API documentation')
@@ -54,7 +57,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   console.log(`Application is running on: http://localhost:${port}`);
 }
 

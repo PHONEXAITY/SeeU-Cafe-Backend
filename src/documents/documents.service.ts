@@ -1,21 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
-
-// Define a MulterFile interface to use instead of Express.Multer.File
-interface MulterFile {
-  fieldname: string;
-  originalname: string;
-  encoding: string;
-  mimetype: string;
-  size: number;
-  destination?: string;
-  filename?: string;
-  path?: string;
-  buffer: Buffer;
-}
+import { Document } from '@prisma/client';
 
 @Injectable()
 export class DocumentsService {
@@ -25,7 +17,6 @@ export class DocumentsService {
   ) {}
 
   async create(createDocumentDto: CreateDocumentDto) {
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: createDocumentDto.user_id },
     });
@@ -44,32 +35,19 @@ export class DocumentsService {
     });
   }
 
-  async uploadDocument(
-    file: MulterFile, // Changed from Express.Multer.File to our custom MulterFile
-    userId: number,
-    documentType: string,
-  ) {
-    // Check if user exists
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  async findByEmployeeId(employeeId: number): Promise<Document[]> {
+    const documents = await this.prisma.document.findMany({
+      where: { employee_id: employeeId },
+      orderBy: { uploaded_at: 'desc' },
     });
 
-    if (!user) {
-      throw new NotFoundException(`User with ID ${userId} not found`);
+    if (!documents || documents.length === 0) {
+      throw new NotFoundException(
+        `No documents found for employee ID ${employeeId}`,
+      );
     }
 
-    // Upload file to Cloudinary
-    const result = await this.cloudinaryService.uploadFile(file, 'documents');
-
-    // Create document in database
-    return this.prisma.document.create({
-      data: {
-        user_id: userId,
-        document_type: documentType,
-        file_path: result.secure_url,
-        uploaded_at: new Date(),
-      },
-    });
+    return documents;
   }
 
   async findAll() {
@@ -90,8 +68,33 @@ export class DocumentsService {
     });
   }
 
+  async uploadDocument(
+    file: Express.Multer.File,
+    options: {
+      documentType: string;
+      userId?: number;
+      employeeId?: number;
+    },
+  ) {
+    if (!options.userId && !options.employeeId) {
+      throw new BadRequestException(
+        'Either userId or employeeId must be provided',
+      );
+    }
+
+    const result = await this.cloudinaryService.uploadFile(file, 'documents');
+
+    return this.prisma.document.create({
+      data: {
+        document_type: options.documentType,
+        user_id: options.userId,
+        employee_id: options.employeeId,
+        file_path: result.secure_url,
+      },
+    });
+  }
+
   async findByUserId(userId: number) {
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -131,10 +134,8 @@ export class DocumentsService {
   }
 
   async update(id: number, updateDocumentDto: UpdateDocumentDto) {
-    // Check if document exists
     await this.findOne(id);
 
-    // If user_id is being updated, check if the new user exists
     if (updateDocumentDto.user_id) {
       const user = await this.prisma.user.findUnique({
         where: { id: updateDocumentDto.user_id },
@@ -164,11 +165,8 @@ export class DocumentsService {
   }
 
   async remove(id: number) {
-    // Check if document exists and get file path
     const document = await this.findOne(id);
 
-    // Extract public ID from Cloudinary URL if applicable
-    // Example URL: https://res.cloudinary.com/cloud-name/image/upload/v1234567890/public-id.jpg
     if (
       document.file_path.includes('cloudinary') &&
       document.file_path.includes('/upload/')
@@ -176,9 +174,8 @@ export class DocumentsService {
       try {
         const urlParts = document.file_path.split('/');
         const publicIdWithExtension = urlParts[urlParts.length - 1];
-        const publicId = publicIdWithExtension.split('.')[0]; // Remove file extension
+        const publicId = publicIdWithExtension.split('.')[0];
 
-        // Delete from Cloudinary (this is optional and can fail silently)
         await this.cloudinaryService.deleteFile(publicId).catch(() => {
           console.log(`Could not delete file from Cloudinary: ${publicId}`);
         });
@@ -187,11 +184,34 @@ export class DocumentsService {
       }
     }
 
-    // Delete from database
     await this.prisma.document.delete({
       where: { id },
     });
 
     return { message: 'Document deleted successfully' };
+  }
+
+  async downloadDocument(id: number) {
+    const document = await this.findOne(id);
+
+    if (!document || !document.file_path) {
+      throw new NotFoundException('Document not found or has no file path');
+    }
+
+    return {
+      url: document.file_path,
+      filename: this.getFilenameFromUrl(document.file_path),
+      documentType: document.document_type,
+    };
+  }
+
+  private getFilenameFromUrl(url: string): string {
+    try {
+      const urlParts = url.split('/');
+      return urlParts[urlParts.length - 1];
+    } catch (error) {
+      console.error(error.message);
+      return `document-${Date.now()}.pdf`;
+    }
   }
 }

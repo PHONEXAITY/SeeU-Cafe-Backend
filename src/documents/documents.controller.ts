@@ -9,6 +9,9 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  ParseIntPipe,
+  BadRequestException,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service';
@@ -25,6 +28,14 @@ import {
   ApiConsumes,
   ApiBody,
 } from '@nestjs/swagger';
+import { Express } from 'express';
+import { Response } from 'express';
+import axios from 'axios';
+import { Stream } from 'stream';
+
+interface CustomAxiosResponse {
+  data: Stream;
+}
 
 @ApiTags('Documents')
 @Controller('documents')
@@ -52,16 +63,10 @@ export class DocumentsController {
     schema: {
       type: 'object',
       properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-        },
-        userId: {
-          type: 'integer',
-        },
-        documentType: {
-          type: 'string',
-        },
+        file: { type: 'string', format: 'binary' },
+        documentType: { type: 'string' },
+        userId: { type: 'number', nullable: true },
+        employeeId: { type: 'number', nullable: true },
       },
     },
   })
@@ -71,13 +76,24 @@ export class DocumentsController {
   @ApiResponse({ status: 201, description: 'Document uploaded successfully' })
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'User not found' })
-  upload(
-    @UploadedFile() file: any, // Changed from Express.Multer.File to any as a quick fix
-    @Body('userId') userId: string,
+  @ApiResponse({ status: 404, description: 'User/Employee not found' })
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
     @Body('documentType') documentType: string,
+    @Body('userId') userId?: string,
+    @Body('employeeId') employeeId?: string,
   ) {
-    return this.documentsService.uploadDocument(file, +userId, documentType);
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    const options = {
+      documentType,
+      userId: userId ? +userId : undefined,
+      employeeId: employeeId ? +employeeId : undefined,
+    };
+
+    return this.documentsService.uploadDocument(file, options);
   }
 
   @Get()
@@ -90,13 +106,23 @@ export class DocumentsController {
     return this.documentsService.findAll();
   }
 
+  @Get('employee/:employeeId')
+  @ApiOperation({ summary: 'Get documents by employee ID' })
+  @ApiResponse({ status: 200, description: 'List of documents' })
+  @ApiResponse({ status: 404, description: 'Employee not found' })
+  async getDocumentsByEmployeeId(
+    @Param('employeeId', ParseIntPipe) employeeId: number,
+  ) {
+    return this.documentsService.findByEmployeeId(employeeId);
+  }
+
   @Get('user/:userId')
   @ApiOperation({ summary: 'Get documents by user ID (Authenticated users)' })
   @ApiResponse({ status: 200, description: 'List of user documents' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  findByUserId(@Param('userId') userId: string) {
-    return this.documentsService.findByUserId(+userId);
+  async findByUserId(@Param('userId', ParseIntPipe) userId: number) {
+    return this.documentsService.findByUserId(userId);
   }
 
   @Get(':id')
@@ -104,8 +130,8 @@ export class DocumentsController {
   @ApiResponse({ status: 200, description: 'Document details' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Document not found' })
-  findOne(@Param('id') id: string) {
-    return this.documentsService.findOne(+id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.documentsService.findOne(id);
   }
 
   @Patch(':id')
@@ -115,11 +141,11 @@ export class DocumentsController {
   @ApiResponse({ status: 200, description: 'Document updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Document or user not found' })
-  update(
-    @Param('id') id: string,
+  async update(
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateDocumentDto: UpdateDocumentDto,
   ) {
-    return this.documentsService.update(+id, updateDocumentDto);
+    return this.documentsService.update(id, updateDocumentDto);
   }
 
   @Delete(':id')
@@ -127,7 +153,44 @@ export class DocumentsController {
   @ApiResponse({ status: 200, description: 'Document deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Document not found' })
-  remove(@Param('id') id: string) {
-    return this.documentsService.remove(+id);
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return this.documentsService.remove(id);
+  }
+
+  @Get(':id/download')
+  async downloadDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    const documentInfo = await this.documentsService.downloadDocument(id);
+
+    const response = (await axios({
+      method: 'GET',
+      url: documentInfo.url,
+      responseType: 'stream',
+    })) as CustomAxiosResponse;
+
+    res.setHeader('Content-Type', this.getContentType(documentInfo.filename));
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${documentInfo.filename}"`,
+    );
+
+    response.data.pipe(res);
+  }
+  private getContentType(filename: string): string {
+    const ext = filename.split('.').pop()?.toLowerCase() ?? 'unknown';
+    const contentTypeMap: Record<string, string> = {
+      pdf: 'application/pdf',
+      doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+    };
+
+    return contentTypeMap[ext] || 'application/octet-stream';
   }
 }

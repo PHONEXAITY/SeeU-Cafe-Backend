@@ -3,19 +3,25 @@ import {
   IsNotEmpty,
   IsString,
   IsEmail,
-  IsPhoneNumber,
   IsOptional,
   IsNumber,
   IsUrl,
   IsDateString,
   IsEnum,
   Min,
+  Matches,
 } from 'class-validator';
 
 enum Gender {
   MALE = 'male',
   FEMALE = 'female',
   OTHER = 'other',
+}
+
+enum Status {
+  ACTIVE = 'active',
+  LEAVE = 'leave',
+  INACTIVE = 'inactive',
 }
 
 export class CreateEmployeeDto {
@@ -45,9 +51,11 @@ export class CreateEmployeeDto {
 
   @ApiPropertyOptional({
     description: 'Phone number of the employee',
-    example: '+66123456789',
+    example: '0201234567',
   })
-  @IsPhoneNumber()
+  @Matches(/^[0-9]{10,12}$/, {
+    message: 'Phone must be a valid number with 10-12 digits',
+  })
   @IsOptional()
   phone?: string;
 
@@ -61,12 +69,21 @@ export class CreateEmployeeDto {
 
   @ApiProperty({
     description: 'Position of the employee',
-    example: 'Barista',
+    example: 'manager',
   })
   @IsString()
   @IsNotEmpty()
   position: string;
 
+  @ApiPropertyOptional({
+    description: 'Status of the employee',
+    enum: Status,
+    example: Status.ACTIVE,
+    default: Status.ACTIVE,
+  })
+  @IsEnum(Status)
+  @IsOptional()
+  status?: string;
   @ApiPropertyOptional({
     description: 'Salary of the employee',
     example: 15000,
@@ -78,20 +95,18 @@ export class CreateEmployeeDto {
 
   @ApiPropertyOptional({
     description: 'Profile photo URL of the employee',
-    example:
-      'https://res.cloudinary.com/your-cloud/image/upload/employee-photo.jpg',
+    example: 'https://example.com/photo.jpg',
   })
-  @IsUrl()
+  @IsUrl({ require_protocol: true })
   @IsOptional()
   profile_photo?: string;
 
   @ApiPropertyOptional({
-    description: 'Document IDs or URLs of the employee (JSON string)',
-    example: '{"id_card": "url1", "work_permit": "url2"}',
+    description: 'Documents data (should be handled via separate API)',
+    example: null,
   })
-  @IsString()
   @IsOptional()
-  documents?: string;
+  documents?: any;
 
   @ApiPropertyOptional({
     description: 'Date of birth of the employee',

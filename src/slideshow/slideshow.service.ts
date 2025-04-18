@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateSlideshowDto } from './dto/create-slideshow.dto';
 import { UpdateSlideshowDto } from './dto/update-slideshow.dto';
-
-// Import or define the MulterFile interface
 import { MulterFile } from '../types/multer';
 
 @Injectable()
@@ -15,25 +17,72 @@ export class SlideshowService {
   ) {}
 
   async create(createSlideshowDto: CreateSlideshowDto) {
-    return this.prisma.slideshow.create({
-      data: createSlideshowDto,
-    });
-  }
+    if (createSlideshowDto.status === 'scheduled') {
+      if (!createSlideshowDto.startDate || !createSlideshowDto.endDate) {
+        throw new BadRequestException(
+          'Start date and end date are required for scheduled slides',
+        );
+      }
 
-  async uploadSlideImage(file: MulterFile, slideshowData: CreateSlideshowDto) {
-    // Upload file to Cloudinary
-    const result = await this.cloudinaryService.uploadFile(file, 'slideshow');
+      if (typeof createSlideshowDto.startDate === 'string') {
+        createSlideshowDto.startDate = new Date(createSlideshowDto.startDate);
+      }
 
-    // Create slideshow item with uploaded image
-    const data = { ...slideshowData, image: result.secure_url };
+      if (typeof createSlideshowDto.endDate === 'string') {
+        createSlideshowDto.endDate = new Date(createSlideshowDto.endDate);
+      }
+    }
+
+    const data: any = { ...createSlideshowDto };
+
+    if (!data.image) {
+      throw new BadRequestException('Image is required');
+    }
 
     return this.prisma.slideshow.create({
       data,
     });
   }
 
-  async findAll(status?: string) {
-    const where = status ? { status } : {};
+  async uploadSlideImage(file: MulterFile, slideshowData: CreateSlideshowDto) {
+    const result = await this.cloudinaryService.uploadFile(file, 'slideshow');
+
+    const data: any = { ...slideshowData, image: result.secure_url };
+
+    if (data.status === 'scheduled') {
+      if (!data.startDate || !data.endDate) {
+        throw new BadRequestException(
+          'Start date and end date are required for scheduled slides',
+        );
+      }
+
+      if (data.startDate && typeof data.startDate === 'string') {
+        data.startDate = new Date(data.startDate as string);
+      }
+
+      if (data.endDate && typeof data.endDate === 'string') {
+        data.endDate = new Date(data.endDate as string);
+      }
+    }
+
+    return this.prisma.slideshow.create({
+      data,
+    });
+  }
+
+  async findAll(status?: string, search?: string) {
+    const where: any = {};
+
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { subtitle: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     return this.prisma.slideshow.findMany({
       where,
@@ -61,7 +110,6 @@ export class SlideshowService {
   }
 
   async update(id: number, updateSlideshowDto: UpdateSlideshowDto) {
-    // Check if slideshow item exists
     await this.findOne(id);
 
     return this.prisma.slideshow.update({
@@ -75,19 +123,15 @@ export class SlideshowService {
     file: MulterFile,
     updateData?: UpdateSlideshowDto,
   ) {
-    // Check if slideshow item exists
     const slideshow = await this.findOne(id);
 
-    // Upload new image to Cloudinary
     const result = await this.cloudinaryService.uploadFile(file, 'slideshow');
 
-    // Prepare update data
     const data = {
       ...(updateData || {}),
       image: result.secure_url,
     };
 
-    // Delete old image from Cloudinary if possible
     if (
       slideshow.image.includes('cloudinary') &&
       slideshow.image.includes('/upload/')
@@ -95,9 +139,8 @@ export class SlideshowService {
       try {
         const urlParts = slideshow.image.split('/');
         const publicIdWithExtension = urlParts[urlParts.length - 1];
-        const publicId = publicIdWithExtension.split('.')[0]; // Remove file extension
+        const publicId = publicIdWithExtension.split('.')[0];
 
-        // Delete from Cloudinary (this is optional and can fail silently)
         await this.cloudinaryService.deleteFile(publicId).catch(() => {
           console.log(`Could not delete file from Cloudinary: ${publicId}`);
         });
@@ -106,7 +149,6 @@ export class SlideshowService {
       }
     }
 
-    // Update slideshow item
     return this.prisma.slideshow.update({
       where: { id },
       data,
@@ -114,10 +156,8 @@ export class SlideshowService {
   }
 
   async remove(id: number) {
-    // Check if slideshow item exists and get image URL
     const slideshow = await this.findOne(id);
 
-    // Extract public ID from Cloudinary URL if applicable
     if (
       slideshow.image.includes('cloudinary') &&
       slideshow.image.includes('/upload/')
@@ -125,9 +165,8 @@ export class SlideshowService {
       try {
         const urlParts = slideshow.image.split('/');
         const publicIdWithExtension = urlParts[urlParts.length - 1];
-        const publicId = publicIdWithExtension.split('.')[0]; // Remove file extension
+        const publicId = publicIdWithExtension.split('.')[0];
 
-        // Delete from Cloudinary (this is optional and can fail silently)
         await this.cloudinaryService.deleteFile(publicId).catch(() => {
           console.log(`Could not delete file from Cloudinary: ${publicId}`);
         });
@@ -136,7 +175,6 @@ export class SlideshowService {
       }
     }
 
-    // Delete from database
     await this.prisma.slideshow.delete({
       where: { id },
     });
@@ -145,7 +183,6 @@ export class SlideshowService {
   }
 
   async reorderSlides(ordersMap: Record<number, number>) {
-    // Update order for each slide
     const updates = Object.entries(ordersMap).map(([id, order]) => {
       return this.prisma.slideshow.update({
         where: { id: parseInt(id) },

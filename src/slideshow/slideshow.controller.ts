@@ -102,11 +102,16 @@ export class SlideshowController {
   @ApiQuery({
     name: 'status',
     required: false,
-    description: 'Filter by status (active, inactive)',
+    description: 'Filter by status (active, inactive, scheduled)',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Search in title and subtitle',
   })
   @ApiResponse({ status: 200, description: 'List of slideshow items' })
-  findAll(@Query('status') status?: string) {
-    return this.slideshowService.findAll(status);
+  findAll(@Query('status') status?: string, @Query('search') search?: string) {
+    return this.slideshowService.findAll(status, search);
   }
 
   @Get('active')

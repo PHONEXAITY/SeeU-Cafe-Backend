@@ -1,64 +1,79 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsNotEmpty,
-  IsOptional,
-  IsNumber,
   IsInt,
-  Min,
+  IsNumber,
+  IsOptional,
   IsString,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateOrderDetailDto {
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: 'ID of the food menu item',
     example: 1,
+    required: false,
   })
-  @IsInt()
   @IsOptional()
+  @IsInt()
   food_menu_id?: number;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: 'ID of the beverage menu item',
-    example: 2,
+    example: 1,
+    required: false,
   })
-  @IsInt()
   @IsOptional()
+  @IsInt()
   beverage_menu_id?: number;
 
   @ApiProperty({
     description: 'Quantity of the item',
     example: 2,
-    minimum: 1,
   })
   @IsInt()
-  @Min(1)
-  @IsNotEmpty()
   quantity: number;
 
   @ApiProperty({
     description: 'Price of the item',
-    example: 9.99,
-    minimum: 0,
+    example: 75.5,
   })
   @IsNumber()
-  @Min(0)
-  @IsNotEmpty()
   price: number;
 
-  @ApiPropertyOptional({
-    description: 'Special notes for the item',
-    example: 'No onions, extra spicy',
+  @ApiProperty({
+    description: 'Special instructions for the item',
+    example: 'No onions, extra sauce',
+    required: false,
   })
-  @IsString()
   @IsOptional()
+  @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({
-    description: 'Status of the order item',
+  @ApiProperty({
+    description: 'Status identifier for the item',
     example: 'pending',
-    default: 'pending',
+    required: false,
   })
-  @IsString()
   @IsOptional()
+  @IsString()
   status_id?: string;
+
+  @ApiProperty({
+    description: 'Preparation time in minutes',
+    example: 15,
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  preparation_time?: number;
+
+  @ApiProperty({
+    description: 'Whether the item is ready',
+    example: false,
+    default: false,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_ready?: boolean;
 }

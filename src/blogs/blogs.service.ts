@@ -12,7 +12,6 @@ export class BlogsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createBlogDto: CreateBlogDto) {
-    // Check if blog with the same slug already exists
     const existingBlog = await this.prisma.blog.findUnique({
       where: { slug: createBlogDto.slug },
     });
@@ -23,14 +22,12 @@ export class BlogsService {
       );
     }
 
-    // Extract categories from DTO
     const { categories, ...blogData } = createBlogDto;
 
-    // Create blog post
     const blog = await this.prisma.blog.create({
       data: {
         ...blogData,
-        // Connect categories if provided
+
         categories:
           categories && categories.length > 0
             ? {
@@ -46,8 +43,23 @@ export class BlogsService {
     return blog;
   }
 
-  async findAll(status?: string, categoryId?: number) {
-    // Build where conditions
+  async findAll(params: {
+    status?: string;
+    categoryId?: number;
+    page?: number;
+    limit?: number;
+    sort?: string;
+    order?: 'asc' | 'desc';
+  }) {
+    const {
+      status,
+      categoryId,
+      page = 1,
+      limit = 10,
+      sort = 'created_at',
+      order = 'desc',
+    } = params;
+
     const where: any = {};
 
     if (status) {
@@ -62,15 +74,34 @@ export class BlogsService {
       };
     }
 
-    return this.prisma.blog.findMany({
+    const skip = (page - 1) * limit;
+    const take = limit;
+
+    const posts = await this.prisma.blog.findMany({
       where,
       include: {
         categories: true,
       },
       orderBy: {
-        created_at: 'desc',
+        [sort]: order,
       },
+      skip,
+      take,
     });
+
+    const total = await this.prisma.blog.count({ where });
+
+    const pagination = {
+      total,
+      page,
+      limit,
+      total_pages: Math.ceil(total / limit),
+    };
+
+    return {
+      posts,
+      pagination,
+    };
   }
 
   async findOne(id: number) {
@@ -85,13 +116,11 @@ export class BlogsService {
       throw new NotFoundException(`Blog with ID ${id} not found`);
     }
 
-    // Increment view count
     await this.prisma.blog.update({
       where: { id },
       data: { views: blog.views + 1 },
     });
 
-    // Return the blog with incremented views
     blog.views += 1;
 
     return blog;
@@ -109,23 +138,19 @@ export class BlogsService {
       throw new NotFoundException(`Blog with slug '${slug}' not found`);
     }
 
-    // Increment view count
     await this.prisma.blog.update({
       where: { id: blog.id },
       data: { views: blog.views + 1 },
     });
 
-    // Return the blog with incremented views
     blog.views += 1;
 
     return blog;
   }
 
   async update(id: number, updateBlogDto: UpdateBlogDto) {
-    // Check if blog exists
     await this.findOne(id);
 
-    // If slug is being updated, check if the new slug is already in use
     if (updateBlogDto.slug) {
       const existingBlog = await this.prisma.blog.findUnique({
         where: { slug: updateBlogDto.slug },
@@ -138,18 +163,15 @@ export class BlogsService {
       }
     }
 
-    // Extract categories from DTO
     const { categories, ...blogData } = updateBlogDto;
 
-    // Update the blog post
     return this.prisma.blog.update({
       where: { id },
       data: {
         ...blogData,
-        // Update categories if provided
+
         categories: categories
           ? {
-              // Disconnect existing categories and connect new ones
               set: categories.map((id) => ({ id })),
             }
           : undefined,
@@ -161,10 +183,8 @@ export class BlogsService {
   }
 
   async remove(id: number) {
-    // Check if blog exists
     await this.findOne(id);
 
-    // Delete the blog
     await this.prisma.blog.delete({
       where: { id },
     });

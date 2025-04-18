@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -29,9 +29,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   ) {
     super({
       jwtFromRequest: (req: Request): string | null => {
+        if (req?.cookies?.auth_token) {
+          return req.cookies.auth_token as string;
+        }
         if (req?.cookies?.access_token) {
           return req.cookies.access_token as string;
         }
+
         const bearerToken: string | null | undefined =
           ExtractJwt.fromAuthHeaderAsBearerToken()(req);
         return bearerToken ?? null;
@@ -42,25 +46,31 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<UserPayload> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      include: {
-        role: true,
-      },
-    });
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        include: {
+          role: true,
+        },
+      });
 
-    if (!user) {
-      throw new Error(`ไม่พบผู้ใช้ที่มี ID ${payload.sub}`);
+      if (!user) {
+        console.log(`ไม่พบผู้ใช้ที่มี ID ${payload.sub} ในฐานข้อมูล`);
+        throw new UnauthorizedException(`การยืนยันตัวตนล้มเหลว`);
+      }
+
+      const result: UserPayload = {
+        id: user.id,
+        email: user.email,
+        role: user.role?.name || 'guest',
+        first_name: user.first_name,
+        last_name: user.last_name,
+      };
+
+      return result;
+    } catch (error) {
+      console.error('JWT validation error:', error);
+      throw new UnauthorizedException('การยืนยันตัวตนล้มเหลว');
     }
-
-    const result: UserPayload = {
-      id: user.id,
-      email: user.email,
-      role: user.role?.name || 'guest',
-      first_name: user.first_name,
-      last_name: user.last_name,
-    };
-
-    return result;
   }
 }

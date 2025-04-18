@@ -12,8 +12,6 @@ import { OrderDetailsService } from './order-details.service';
 import { CreateOrderDetailDto } from './dto/create-order-detail.dto';
 import { UpdateOrderDetailDto } from './dto/update-order-detail.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-/* import { RolesGuard } from '../../auth/guards/roles.guard';
-import { Roles } from '../../auth/decorators/roles.decorator'; */
 import {
   ApiTags,
   ApiOperation,
@@ -75,6 +73,17 @@ export class OrderDetailsController {
     @Body() updateOrderDetailDto: UpdateOrderDetailDto,
   ) {
     return this.orderDetailsService.update(+id, updateOrderDetailDto);
+  }
+
+  @Patch(':id/ready')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mark an order item as ready' })
+  @ApiResponse({ status: 200, description: 'Order item marked as ready' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Order item not found' })
+  markReady(@Param('id') id: string) {
+    return this.orderDetailsService.markReady(+id);
   }
 
   @Delete(':id')

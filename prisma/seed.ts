@@ -6,7 +6,6 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Start seeding...');
 
-  // Clear existing data if in development environment
   if (process.env.NODE_ENV !== 'production') {
     console.log('Clearing existing data...');
     const modelNames = Reflect.ownKeys(prisma).filter((key) => {
@@ -29,8 +28,42 @@ async function main() {
       }
     }
   }
+  const roles = [
+    {
+      name: 'admin',
+      description: 'An administrator with access to all functions',
+    },
+    {
+      name: 'manager',
+      description:
+        'A store manager with the authority to manage employees and view reports',
+    },
+    {
+      name: 'staff',
+      description:
+        'An employee with the authority to manage orders and serve customers',
+    },
+    {
+      name: 'customer',
+      description: 'A customer with the authority to order food and drinks',
+    },
+  ];
 
-  // Create admin user
+  for (const role of roles) {
+    const existingRole = await prisma.role.findUnique({
+      where: { name: role.name },
+    });
+
+    if (!existingRole) {
+      await prisma.role.create({
+        data: role,
+      });
+      console.log(`สร้าง role ${role.name} เรียบร้อยแล้ว`);
+    } else {
+      console.log(`Role ${role.name} มีอยู่ในระบบแล้ว`);
+    }
+  }
+
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
   const adminRole = await prisma.role.upsert({
@@ -39,11 +72,9 @@ async function main() {
     create: {
       name: 'admin',
       description: 'Administrator with full access',
-      // Add other role fields if your schema requires them
     },
   });
 
-  // Then create the admin user and connect to the role
   const adminUser = await prisma.user.create({
     data: {
       email: 'admin@seeu.cafe',
@@ -61,7 +92,6 @@ async function main() {
 
   console.log('Created admin user:', adminUser.email);
 
-  // Create menu categories
   const hotDrinksCategory = await prisma.menuCategory.create({
     data: {
       name: 'Hot Drinks',
@@ -104,7 +134,6 @@ async function main() {
 
   console.log('Created categories');
 
-  // Create beverage menu items
   await prisma.beverageMenu.createMany({
     data: [
       {
@@ -154,7 +183,6 @@ async function main() {
 
   console.log('Created beverage menu items');
 
-  // Create food menu items
   await prisma.foodMenu.createMany({
     data: [
       {
@@ -190,7 +218,6 @@ async function main() {
 
   console.log('Created food menu items');
 
-  // Create a table
   await prisma.table.create({
     data: {
       number: 1,
@@ -202,7 +229,6 @@ async function main() {
 
   console.log('Created table');
 
-  // Create employee
   await prisma.employee.create({
     data: {
       first_name: 'John',
@@ -216,7 +242,6 @@ async function main() {
 
   console.log('Created employee');
 
-  // Create promotion
   await prisma.promotion.create({
     data: {
       name: 'Welcome Discount',
@@ -233,7 +258,6 @@ async function main() {
 
   console.log('Created promotion');
 
-  // Create system settings
   await prisma.systemSettings.createMany({
     data: [
       {
@@ -265,7 +289,6 @@ async function main() {
 
   console.log('Created system settings');
 
-  // Create blog category
   const blogCategory = await prisma.blogCategory.create({
     data: {
       name: 'Coffee Tips',
@@ -276,7 +299,6 @@ async function main() {
 
   console.log('Created blog category');
 
-  // Create blog post
   await prisma.blog.create({
     data: {
       title: 'How to Make Perfect Coffee at Home',
