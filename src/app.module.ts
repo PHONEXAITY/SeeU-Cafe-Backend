@@ -5,7 +5,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import * as redisStore from 'cache-manager-redis-store';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
-
+import { DashboardModule } from './dashboard/dashboard.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -63,6 +63,7 @@ import { UserActivityMiddleware } from './session/user-activity.middleware';
     // Core modules
     PrismaModule,
     AuthModule,
+    DashboardModule,
     UsersModule,
     RolesModule, // Add the new RolesModule
     ProductsModule,

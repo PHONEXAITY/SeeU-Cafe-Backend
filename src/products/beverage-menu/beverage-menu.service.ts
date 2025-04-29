@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+} from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -14,6 +19,12 @@ export class BeverageMenuService {
   ) {}
 
   async create(createBeverageMenuDto: CreateBeverageMenuDto) {
+    if (!createBeverageMenuDto.hot_price && !createBeverageMenuDto.ice_price) {
+      throw new BadRequestException(
+        'At least one of hot_price or ice_price must be provided',
+      );
+    }
+
     const category = await this.prisma.menuCategory.findUnique({
       where: { id: createBeverageMenuDto.category_id },
     });
@@ -25,7 +36,10 @@ export class BeverageMenuService {
     }
 
     const newBeverageMenu = await this.prisma.beverageMenu.create({
-      data: createBeverageMenuDto,
+      data: {
+        ...createBeverageMenuDto,
+        price: createBeverageMenuDto.price ?? null,
+      },
     });
 
     await this.cacheManager.del('beverage_menu_all');

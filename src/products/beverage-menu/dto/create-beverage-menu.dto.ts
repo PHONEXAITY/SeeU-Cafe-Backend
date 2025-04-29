@@ -26,15 +26,15 @@ export class CreateBeverageMenuDto {
   @IsOptional()
   description?: string;
 
-  @ApiProperty({
-    description: 'Regular price of the beverage',
+  @ApiPropertyOptional({
+    description: 'Regular price of the beverage (optional for beverages)',
     example: 3.99,
     minimum: 0,
   })
   @IsNumber()
   @Min(0)
-  @IsNotEmpty()
-  price: number;
+  @IsOptional() // Make price optional
+  price?: number;
 
   @ApiPropertyOptional({
     description: 'Price for hot version of the beverage',

@@ -170,7 +170,7 @@ model BeverageMenu {
   id           Int           @id @default(autoincrement())
   name         String
   description  String?
-  price        Float
+  price        Float?
   category_id  Int
   image        String?
   status       String        @default("active")
@@ -223,6 +223,8 @@ model Payment {
   amount       Float
   method       String
   payment_date DateTime @default(now())
+  notes                 String?
+  transaction_reference String?
   status       String   @default("pending")
   delivery_id  Int?
   order        Order    @relation(fields: [order_id], references: [id])
