@@ -43,7 +43,7 @@ export class CustomerNotificationsController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  create(@Body() createNotificationDto: CreateNotificationDto) {
+  async create(@Body() createNotificationDto: CreateNotificationDto) {
     return this.notificationsService.create(createNotificationDto);
   }
 
@@ -74,7 +74,6 @@ export class CustomerNotificationsController {
     @Query('type') type?: string,
   ) {
     const readBoolean = read ? read === 'true' : undefined;
-
     return this.notificationsService.findAll(
       userId ? +userId : undefined,
       readBoolean,
@@ -145,7 +144,9 @@ export class CustomerNotificationsController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a notification' })
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete a notification (Admin only)' })
   @ApiResponse({
     status: 200,
     description: 'Notification deleted successfully',

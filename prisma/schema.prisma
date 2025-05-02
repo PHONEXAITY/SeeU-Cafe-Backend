@@ -89,6 +89,7 @@ model Order {
   timeline             OrderTimeline[]
   payments             Payment[]
   time_updates         TimeUpdate[]
+   notifications        CustomerNotification[] @relation("OrderToNotification") 
 
   @@index([status])
   @@index([User_id])
@@ -270,17 +271,21 @@ model PromotionUsage {
 }
 
 model CustomerNotification {
-  id         Int      @id @default(autoincrement())
-  user_id    Int
-  order_id   Int
-  message    String
-  type       String
-  created_at DateTime @default(now())
-  read       Boolean  @default(false)
-  action_url String?
-  user       User     @relation(fields: [user_id], references: [id])
+  id           Int      @id @default(autoincrement())
+  user_id      Int?
+  order_id     Int?
+  message      String
+  type         String
+  created_at   DateTime @default(now())
+  read         Boolean  @default(false)
+  action_url   String?
+  target_roles String[] @default([]) // Array of role names for targeted notifications
+  broadcast    Boolean  @default(false) // Flag for broadcasting to all users
+  user         User?    @relation(fields: [user_id], references: [id])
+  order        Order?   @relation("OrderToNotification", fields: [order_id], references: [id])
 
   @@index([user_id])
+  @@index([order_id])
   @@index([read])
   @@index([type])
 }

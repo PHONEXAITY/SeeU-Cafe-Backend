@@ -27,6 +27,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CustomerNotificationsModule } from './customer-notifications/customer-notifications.module';
 import { SessionModule } from './session/session.module';
 import { UserActivityMiddleware } from './session/user-activity.middleware';
+import { CartModule } from './cart/cart.module';
 //import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -69,6 +70,7 @@ import { UserActivityMiddleware } from './session/user-activity.middleware';
     ProductsModule,
     CategoriesModule,
     OrdersModule,
+    CartModule,
     CustomerNotificationsModule,
     PaymentsModule,
     PromotionsModule,

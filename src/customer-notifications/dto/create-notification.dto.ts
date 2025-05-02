@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsOptional,
   IsBoolean,
+  IsArray,
 } from 'class-validator';
 
 enum NotificationType {
@@ -14,27 +15,29 @@ enum NotificationType {
   DELIVERY_UPDATE = 'delivery_update',
   PICKUP_READY = 'pickup_ready',
   PROMOTION = 'promotion',
+  INFO = 'info',
 }
 
 export class CreateNotificationDto {
   @ApiProperty({
-    description: 'ID of the user to send notification to',
+    description:
+      'ID of the user to send notification to (optional if targeting roles or broadcasting)',
     example: 1,
   })
   @IsInt()
-  @IsNotEmpty()
-  user_id: number;
+  @IsOptional()
+  user_id?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'ID of the related order (if applicable)',
     example: 1,
   })
   @IsInt()
-  @IsNotEmpty()
-  order_id: number;
+  @IsOptional()
+  order_id?: number;
 
   @ApiProperty({
-    description: 'Notification message',
+    description: 'Notification message content',
     example: 'Your order will be ready in 15 minutes',
   })
   @IsString()
@@ -66,4 +69,22 @@ export class CreateNotificationDto {
   @IsBoolean()
   @IsOptional()
   read?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Array of role names to target (e.g., ["admin", "employee"])',
+    example: ['admin', 'employee'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  target_roles?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Whether to broadcast the notification to all users',
+    example: false,
+    default: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  broadcast?: boolean;
 }

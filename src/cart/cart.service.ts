@@ -29,7 +29,11 @@ export class CartService {
   async getCart(userId: number): Promise<CartItem[]> {
     const cartKey = this.getCartKey(userId);
     const cartItems = await this.cacheManager.get<CartItem[]>(cartKey);
-    return cartItems || [];
+    if (!cartItems) {
+      await this.cacheManager.set(cartKey, [], 7 * 24 * 60 * 60 * 1000);
+      return [];
+    }
+    return cartItems;
   }
 
   async getCartWithDetails(userId: number): Promise<CartSummary> {
@@ -51,6 +55,11 @@ export class CartService {
             details.image = foodItem.image;
             details.category = foodItem.category?.name;
             subtotal += foodItem.price * item.quantity;
+          } else {
+            details.name = 'Unknown Item';
+            details.price = 0;
+            details.image = null;
+            details.category = 'Unknown';
           }
         } else if (item.beverageMenuId) {
           const beverageItem = await this.prisma.beverageMenu.findUnique({
@@ -64,6 +73,11 @@ export class CartService {
             details.image = beverageItem.image;
             details.category = beverageItem.category?.name;
             subtotal += beverageItem.price * item.quantity;
+          } else {
+            details.name = 'Unknown Item';
+            details.price = 0;
+            details.image = null;
+            details.category = 'Unknown';
           }
         }
 

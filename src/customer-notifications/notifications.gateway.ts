@@ -6,6 +6,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @WebSocketGateway({
   cors: {
@@ -21,6 +22,8 @@ export class NotificationsGateway
 
   private userSockets: Map<number, Socket[]> = new Map();
 
+  constructor(private readonly prisma: PrismaService) {}
+
   handleConnection(client: Socket) {
     const userId = this.getUserIdFromClient(client);
     if (userId) {
@@ -31,7 +34,6 @@ export class NotificationsGateway
       if (userConnections) {
         userConnections.push(client);
       }
-
       console.log(`User ${userId} connected: ${client.id}`);
     }
   }
@@ -49,14 +51,12 @@ export class NotificationsGateway
       } else {
         this.userSockets.delete(userId);
       }
-
       console.log(`User ${userId} disconnected: ${client.id}`);
     }
   }
 
-  sendNotificationToUser(userId: number, notification: any) {
+  sendNotificationToUser(userId: number, notification: any): boolean {
     const connections = this.userSockets.get(userId) || [];
-
     if (connections.length > 0) {
       connections.forEach((socket) => {
         socket.emit('notification', notification);
@@ -64,7 +64,6 @@ export class NotificationsGateway
       console.log(`Notification sent to user ${userId}`);
       return true;
     }
-
     console.log(`User ${userId} is not connected`);
     return false;
   }
@@ -72,6 +71,19 @@ export class NotificationsGateway
   sendNotificationToAll(notification: any) {
     this.server.emit('notification', notification);
     console.log('Notification broadcast to all users');
+  }
+
+  async sendNotificationToRoles(roles: string[], notification: any) {
+    const users = await this.prisma.user.findMany({
+      where: {
+        role: { name: { in: roles } },
+      },
+    });
+
+    await Promise.all(
+      users.map((user) => this.sendNotificationToUser(user.id, notification)),
+    );
+    console.log(`Notification sent to roles: ${roles.join(', ')}`);
   }
 
   private getUserIdFromClient(client: Socket): number | null {
