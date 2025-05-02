@@ -13,7 +13,6 @@ export class CustomerNotificationsService {
   ) {}
 
   async create(createNotificationDto: CreateNotificationDto) {
-    // Validate user if user_id is provided
     if (createNotificationDto.user_id) {
       const user = await this.prisma.user.findUnique({
         where: { id: createNotificationDto.user_id },
@@ -25,7 +24,6 @@ export class CustomerNotificationsService {
       }
     }
 
-    // Validate order if order_id is provided
     if (createNotificationDto.order_id) {
       const order = await this.prisma.order.findUnique({
         where: { id: createNotificationDto.order_id },
@@ -37,7 +35,6 @@ export class CustomerNotificationsService {
       }
     }
 
-    // Validate target_roles if provided
     if (createNotificationDto.target_roles?.length) {
       const roles = await this.prisma.role.findMany({
         where: { name: { in: createNotificationDto.target_roles } },
@@ -76,7 +73,6 @@ export class CustomerNotificationsService {
       },
     });
 
-    // Handle notification distribution
     if (createNotificationDto.broadcast) {
       this.notificationsGateway.sendNotificationToAll(notification);
     } else if (createNotificationDto.target_roles?.length) {
@@ -98,11 +94,20 @@ export class CustomerNotificationsService {
     return notification;
   }
 
-  async findAll(userId?: number, read?: boolean, type?: string) {
+  async findAll(
+    userId?: number,
+    read?: boolean,
+    type?: string,
+    includeBroadcast = false,
+  ) {
     const where: Prisma.CustomerNotificationWhereInput = {};
 
     if (userId) {
-      where.user_id = userId;
+      if (includeBroadcast) {
+        where.OR = [{ user_id: userId }, { broadcast: true }];
+      } else {
+        where.user_id = userId;
+      }
     }
 
     if (read !== undefined) {
@@ -133,7 +138,7 @@ export class CustomerNotificationsService {
 
   async findOne(id: number) {
     const notification = await this.prisma.customerNotification.findUnique({
-      where: { id },
+      where: { id: id },
       include: {
         user: {
           select: {
@@ -154,16 +159,64 @@ export class CustomerNotificationsService {
   }
 
   async findAllByUser(userId: number) {
+    console.log('Fetching notifications for user:', userId);
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: { role: true },
     });
 
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
+    const userRole = user.role ? user.role.name : null;
+    console.log('User role:', userRole);
+
+    const orConditions: Prisma.CustomerNotificationWhereInput[] = [
+      { user_id: userId },
+      { broadcast: true },
+    ];
+
+    if (userRole) {
+      orConditions.push({
+        target_roles: {
+          has: userRole,
+        },
+      });
+    }
+
+    const notifications = await this.prisma.customerNotification.findMany({
+      where: {
+        OR: orConditions,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
+
+    console.log(
+      `Found ${notifications.length} notifications for user ${userId}`,
+    );
+
+    return notifications;
+  }
+
+  async findAllBroadcast() {
     return this.prisma.customerNotification.findMany({
-      where: { user_id: userId },
+      where: {
+        broadcast: true,
+      },
       include: {
         user: {
           select: {
@@ -180,7 +233,30 @@ export class CustomerNotificationsService {
     });
   }
 
-  async findUnreadByUser(userId: number) {
+  async findByRoles(roles: string[]) {
+    return this.prisma.customerNotification.findMany({
+      where: {
+        target_roles: {
+          hasSome: roles,
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
+  }
+
+  async findUnreadByUser(userId: number, includeBroadcast = false) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -189,11 +265,18 @@ export class CustomerNotificationsService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
+    const where: Prisma.CustomerNotificationWhereInput = {
+      read: false,
+    };
+
+    if (includeBroadcast) {
+      where.OR = [{ user_id: userId }, { broadcast: true }];
+    } else {
+      where.user_id = userId;
+    }
+
     return this.prisma.customerNotification.findMany({
-      where: {
-        user_id: userId,
-        read: false,
-      },
+      where,
       include: {
         user: {
           select: {

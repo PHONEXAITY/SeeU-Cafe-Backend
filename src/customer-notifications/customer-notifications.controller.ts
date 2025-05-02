@@ -72,13 +72,37 @@ export class CustomerNotificationsController {
     @Query('userId') userId?: string,
     @Query('read') read?: string,
     @Query('type') type?: string,
+    @Query('include_broadcast') includeBroadcast?: string,
   ) {
     const readBoolean = read ? read === 'true' : undefined;
+    const includeBroadcastBoolean = includeBroadcast === 'true';
+
     return this.notificationsService.findAll(
       userId ? +userId : undefined,
       readBoolean,
       type,
+      includeBroadcastBoolean,
     );
+  }
+
+  @Get('broadcast')
+  @ApiOperation({ summary: 'Get all broadcast notifications' })
+  @ApiResponse({ status: 200, description: 'List of broadcast notifications' })
+  findAllBroadcast() {
+    return this.notificationsService.findAllBroadcast();
+  }
+
+  @Get('roles')
+  @ApiOperation({ summary: 'Get notifications for specific roles' })
+  @ApiQuery({
+    name: 'role',
+    required: true,
+    description: 'Role name to filter by',
+    isArray: true,
+  })
+  @ApiResponse({ status: 200, description: 'List of role-based notifications' })
+  findByRoles(@Query('role') roles: string[]) {
+    return this.notificationsService.findByRoles(roles);
   }
 
   @Get('user/:userId')
@@ -95,8 +119,15 @@ export class CustomerNotificationsController {
   @ApiResponse({ status: 200, description: 'List of unread notifications' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  findUnreadByUser(@Param('userId') userId: string) {
-    return this.notificationsService.findUnreadByUser(+userId);
+  findUnreadByUser(
+    @Param('userId') userId: string,
+    @Query('include_broadcast') includeBroadcast?: string,
+  ) {
+    const includeBroadcastBoolean = includeBroadcast === 'true';
+    return this.notificationsService.findUnreadByUser(
+      +userId,
+      includeBroadcastBoolean,
+    );
   }
 
   @Get(':id')
