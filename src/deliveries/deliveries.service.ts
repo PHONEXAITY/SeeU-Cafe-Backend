@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomerNotificationsService } from '../customer-notifications/customer-notifications.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
@@ -12,8 +13,74 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class DeliveriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: CustomerNotificationsService,
+  ) {}
+  private async createDeliveryNotification(
+    orderId: number,
+    status: string,
+    estimatedTime?: Date,
+    customMessage?: string,
+  ) {
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          User_id: true,
+          order_id: true,
+        },
+      });
 
+      if (!order || !order.User_id) {
+        return;
+      }
+
+      let message = customMessage;
+      if (!message) {
+        switch (status) {
+          case 'pending': {
+            message = `Your delivery order #${order.order_id} is being processed. We'll notify you when it's ready for delivery.`;
+            break;
+          }
+          case 'preparing': {
+            message = `Your order #${order.order_id} is being prepared. It will be ready for delivery soon.`;
+            break;
+          }
+          case 'out_for_delivery': {
+            const eta = estimatedTime
+              ? `and should arrive by ${estimatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : '';
+            message = `Your order #${order.order_id} is on the way ${eta}.`;
+            break;
+          }
+          case 'delivered': {
+            message = `Your order #${order.order_id} has been delivered. Enjoy your meal!`;
+            break;
+          }
+          case 'cancelled': {
+            message = `Your delivery for order #${order.order_id} has been cancelled. Contact customer service for more information.`;
+            break;
+          }
+          default: {
+            message = `Your delivery for order #${order.order_id} has been updated to status: ${status}.`;
+            break;
+          }
+        }
+      }
+
+      await this.notificationsService.create({
+        user_id: order.User_id,
+        order_id: orderId,
+        message,
+        type: 'delivery_update',
+        action_url: `/delivery`,
+        read: false,
+      });
+    } catch (error) {
+      console.error('Failed to create delivery notification:', error);
+    }
+  }
   async create(createDeliveryDto: CreateDeliveryDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: createDeliveryDto.order_id },
@@ -297,7 +364,23 @@ export class DeliveriesService {
       },
     });
 
-    // Handle delivery status changes
+    if (
+      updateDeliveryDto.status &&
+      updateDeliveryDto.status !== existingDelivery.status
+    ) {
+      const estimatedTime = updateDeliveryDto.estimated_delivery_time
+        ? new Date(
+            updateDeliveryDto.estimated_delivery_time as unknown as string,
+          )
+        : existingDelivery.estimated_delivery_time || undefined;
+
+      await this.createDeliveryNotification(
+        existingDelivery.order_id,
+        updateDeliveryDto.status,
+        estimatedTime,
+      );
+    }
+
     if (
       updateDeliveryDto.status === 'delivered' &&
       existingDelivery.status !== 'delivered'
@@ -308,7 +391,6 @@ export class DeliveriesService {
         data: { actual_delivery_time: now },
       });
 
-      // Get the order from the included data
       const orderData = updatedDelivery.order;
 
       await this.prisma.order.update({
@@ -397,6 +479,15 @@ export class DeliveriesService {
       where: { id },
       data: { status },
     });
+    if (status !== delivery.status) {
+      const estimatedTime = delivery.estimated_delivery_time || undefined;
+
+      await this.createDeliveryNotification(
+        delivery.order_id,
+        status,
+        estimatedTime,
+      );
+    }
 
     if (status === 'delivered' && delivery.status !== 'delivered') {
       const now = new Date();
@@ -405,7 +496,6 @@ export class DeliveriesService {
         data: { actual_delivery_time: now },
       });
 
-      // Access the order through the include in findOne
       const orderData = delivery.order;
 
       await this.prisma.order.update({
@@ -489,11 +579,11 @@ export class DeliveriesService {
     const delivery = await this.findOne(id);
     const orderData = delivery.order;
 
-    let previousTime: Date | null = null;
+    let previousTime: Date | undefined = undefined;
     if (updateTimeDto.timeType === 'estimated_delivery_time') {
-      previousTime = delivery.estimated_delivery_time;
+      previousTime = delivery.estimated_delivery_time || undefined;
     } else if (updateTimeDto.timeType === 'pickup_from_kitchen_time') {
-      previousTime = delivery.pickup_from_kitchen_time;
+      previousTime = delivery.pickup_from_kitchen_time || undefined;
     }
 
     const updatedDelivery = await this.prisma.delivery.update({
@@ -502,6 +592,24 @@ export class DeliveriesService {
         [updateTimeDto.timeType]: updateTimeDto.newTime,
       },
     });
+
+    if (updateTimeDto.timeType === 'estimated_delivery_time') {
+      const deliveryTimeStr = updateTimeDto.newTime.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const message =
+        updateTimeDto.notificationMessage ||
+        `Your delivery time for order #${orderData.order_id} has been updated. New estimated delivery time: ${deliveryTimeStr}.`;
+
+      await this.createDeliveryNotification(
+        delivery.order_id,
+        delivery.status,
+        updateTimeDto.newTime,
+        message,
+      );
+    }
 
     await this.prisma.timeUpdate.create({
       data: {
@@ -515,16 +623,18 @@ export class DeliveriesService {
     });
 
     if (updateTimeDto.notifyCustomer && orderData?.User_id) {
-      await this.prisma.customerNotification.create({
-        data: {
-          user_id: orderData.User_id,
-          order_id: delivery.order_id,
-          message:
-            updateTimeDto.notificationMessage ||
-            `Your delivery time has been updated. New estimated time: ${updateTimeDto.newTime.toLocaleString()}`,
-          type: 'delivery_update',
-          action_url: `/orders/${orderData.order_id}`,
-        },
+      const deliveryTimeStr = updateTimeDto.newTime.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      await this.notificationsService.create({
+        user_id: orderData.User_id,
+        order_id: delivery.order_id,
+        message: `Your delivery time has been updated. New estimated time: ${deliveryTimeStr}`,
+        type: 'delivery_update',
+        action_url: `/delivery`,
+        read: false,
       });
     }
 
@@ -541,6 +651,6 @@ export class DeliveriesService {
       where: { id },
     });
 
-    return { message: 'Delivery deleted successfully' };
+    return { message: 'delivery_update' };
   }
 }
