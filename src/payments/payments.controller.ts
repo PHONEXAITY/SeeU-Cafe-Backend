@@ -8,6 +8,9 @@ import {
   Delete,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -15,6 +18,10 @@ import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
+import { UploadPaymentProofDto } from './dto/upload-payment-proof.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -22,6 +29,7 @@ import {
   ApiBearerAuth,
   ApiQuery,
   ApiBody,
+  ApiConsumes,
 } from '@nestjs/swagger';
 
 @ApiTags('Payments')
@@ -39,6 +47,111 @@ export class PaymentsController {
   @ApiResponse({ status: 404, description: 'Order or delivery not found' })
   create(@Body() createPaymentDto: CreatePaymentDto) {
     return this.paymentsService.create(createPaymentDto);
+  }
+
+  @Post('upload-proof')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Upload payment proof' })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment proof uploaded successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        payment_id: { type: 'integer' },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/payment-proofs',
+        filename: (req, file, cb) => {
+          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const ext = extname(file.originalname);
+          cb(null, `payment-proof-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.match(/\/(jpg|jpeg|png|gif)$/)) {
+          return cb(
+            new BadRequestException('Only image files are allowed!'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  async uploadPaymentProof(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() uploadDto: UploadPaymentProofDto,
+  ) {
+    return this.paymentsService.uploadPaymentProof(uploadDto.payment_id, file);
+  }
+
+  @Post('with-proof')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create payment with proof' })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment created with proof successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        order_id: { type: 'integer' },
+        amount: { type: 'number' },
+        method: { type: 'string' },
+        status: { type: 'string' },
+        notes: { type: 'string' },
+        file: { type: 'string', format: 'binary' },
+      },
+      required: ['order_id', 'amount', 'method', 'file'],
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/payment-proofs',
+        filename: (req, file, cb) => {
+          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const ext = extname(file.originalname);
+          cb(null, `payment-proof-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.match(/\/(jpg|jpeg|png|gif)$/)) {
+          return cb(
+            new BadRequestException('Only image files are allowed!'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  async createPaymentWithProof(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() createPaymentDto: CreatePaymentDto,
+  ) {
+    return this.paymentsService.createWithProof(createPaymentDto, file);
   }
 
   @Get()
@@ -65,6 +178,53 @@ export class PaymentsController {
   @ApiResponse({ status: 404, description: 'Payment not found' })
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(+id);
+  }
+
+  @Get(':id/proof')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get payment proof' })
+  @ApiResponse({ status: 200, description: 'Payment proof details' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Payment proof not found' })
+  async getPaymentProof(@Param('id') id: string) {
+    return this.paymentsService.getPaymentProof(+id);
+  }
+
+  @Patch(':id/approve')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Approve payment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Payment approved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  async approvePayment(@Param('id') id: string) {
+    return this.paymentsService.approvePayment(+id);
+  }
+
+  @Patch(':id/reject')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reject payment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Payment rejected successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', example: 'Invalid payment proof' },
+      },
+    },
+  })
+  async rejectPayment(
+    @Param('id') id: string,
+    @Body('reason') reason?: string,
+  ) {
+    return this.paymentsService.rejectPayment(+id, reason);
   }
 
   @Patch(':id')
@@ -94,7 +254,7 @@ export class PaymentsController {
       properties: {
         status: {
           type: 'string',
-          enum: ['pending', 'completed', 'failed', 'refunded', 'cancelled'],
+          enum: ['pending', 'completed', 'failed', 'refunded'],
           example: 'completed',
         },
       },

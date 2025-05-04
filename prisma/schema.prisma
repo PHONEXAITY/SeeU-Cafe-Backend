@@ -228,6 +228,7 @@ model Payment {
   transaction_reference String?
   status       String   @default("pending")
   delivery_id  Int?
+  payment_proof String? 
   order        Order    @relation(fields: [order_id], references: [id])
 
   @@index([order_id])
