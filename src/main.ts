@@ -46,10 +46,19 @@ async function bootstrap() {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['Content-Disposition'],
   });
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
+  });
+
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/uploads/')) {
+      res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.header('Access-Control-Allow-Origin', '*');
+    }
+    next();
   });
 
   const config = new DocumentBuilder()

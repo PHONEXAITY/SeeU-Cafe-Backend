@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Res,
   Body,
   Patch,
   Param,
@@ -11,7 +12,13 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  StreamableFile,
+  NotFoundException,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { createReadStream } from 'fs';
+import { join } from 'path';
+import * as fs from 'fs';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -178,6 +185,81 @@ export class PaymentsController {
   @ApiResponse({ status: 404, description: 'Payment not found' })
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(+id);
+  }
+  @Get(':id/proof-image')
+  async getPaymentProofImage(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const payment = await this.paymentsService.findOne(+id);
+
+    if (!payment || !payment.payment_proof) {
+      throw new NotFoundException('Payment proof not found');
+    }
+
+    const filePath = join(process.cwd(), payment.payment_proof);
+
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Payment proof file not found');
+    }
+
+    const fileName = payment.payment_proof.split('/').pop() || '';
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+
+    const mimeTypes = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      pdf: 'application/pdf',
+    };
+
+    res.set({
+      'Content-Type':
+        mimeTypes[ext as keyof typeof mimeTypes] || 'application/octet-stream',
+      'Content-Disposition': `inline; filename="${fileName}"`,
+    });
+
+    const file = createReadStream(filePath);
+    return new StreamableFile(file);
+  }
+
+  @Get(':id/proof-download')
+  async downloadPaymentProof(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const payment = await this.paymentsService.findOne(+id);
+
+    if (!payment || !payment.payment_proof) {
+      throw new NotFoundException('Payment proof not found');
+    }
+
+    const filePath = join(process.cwd(), payment.payment_proof);
+
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Payment proof file not found');
+    }
+
+    const fileName = payment.payment_proof.split('/').pop() || '';
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+
+    const mimeTypes = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      pdf: 'application/pdf',
+    };
+
+    res.set({
+      'Content-Type':
+        mimeTypes[ext as keyof typeof mimeTypes] || 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+
+    const file = createReadStream(filePath);
+    return new StreamableFile(file);
   }
 
   @Get(':id/proof')
