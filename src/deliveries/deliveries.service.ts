@@ -260,7 +260,9 @@ export class DeliveriesService {
 
   async findByOrderId(orderId: number) {
     const delivery = await this.prisma.delivery.findUnique({
-      where: { order_id: orderId },
+      where: {
+        order_id: orderId,
+      },
       include: {
         order: {
           include: {

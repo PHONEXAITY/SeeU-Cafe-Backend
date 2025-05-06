@@ -11,11 +11,13 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @WebSocketGateway({
   cors: {
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-    ],
+    origin: process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',')
+      : [
+          'http://localhost:3000',
+          'http://localhost:3001',
+          'http://localhost:3002',
+        ],
     credentials: true,
   },
 })
@@ -38,6 +40,13 @@ export class PaymentsGateway {
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+
+    client.rooms.forEach((room) => {
+      if (room !== client.id) {
+        client.leave(room);
+        this.logger.log(`Client ${client.id} left room: ${room}`);
+      }
+    });
   }
 
   @SubscribeMessage('subscribeToPaymentStatus')
@@ -45,10 +54,27 @@ export class PaymentsGateway {
     @MessageBody() data: { paymentId: number; userId: number },
     @ConnectedSocket() client: Socket,
   ) {
+    if (!data.paymentId || !data.userId) {
+      this.logger.error(`Invalid subscription data: ${JSON.stringify(data)}`);
+      client.emit('error', {
+        message: 'Invalid paymentId or userId',
+      });
+      return;
+    }
+
+    const room = `payment_${data.paymentId}`;
+
+    if (client.rooms.has(room)) {
+      this.logger.log(
+        `Client ${client.id} already subscribed to room ${room} for payment ${data.paymentId}`,
+      );
+      return;
+    }
+
     this.logger.log(
-      `Client ${client.id} subscribed to payment ${data.paymentId}`,
+      `Client ${client.id} subscribed to payment ${data.paymentId} for user ${data.userId}`,
     );
-    await client.join(`payment_${data.paymentId}`);
+    await client.join(room);
 
     const payment = await this.prisma.payment.findUnique({
       where: { id: data.paymentId },
@@ -56,20 +82,26 @@ export class PaymentsGateway {
     });
 
     if (payment) {
-      void client.emit('paymentStatusUpdate', {
+      client.emit('paymentStatusUpdate', {
         paymentId: data.paymentId,
         status: payment.status,
+      });
+    } else {
+      this.logger.warn(`Payment ${data.paymentId} not found`);
+      client.emit('error', {
+        message: `Payment ${data.paymentId} not found`,
       });
     }
   }
 
   broadcastPaymentStatusUpdate(paymentId: number, status: string) {
-    this.server.to(`payment_${paymentId}`).emit('paymentStatusUpdate', {
+    const room = `payment_${paymentId}`;
+    this.server.to(room).emit('paymentStatusUpdate', {
       paymentId,
       status,
     });
     this.logger.log(
-      `Broadcasted payment status update: ${paymentId} - ${status}`,
+      `Broadcasted payment status update to room ${room}: payment ${paymentId} - ${status}`,
     );
   }
 }
