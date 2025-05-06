@@ -56,7 +56,11 @@ export class TablesService {
   }
 
   async findAvailableTables(capacity?: number) {
-    const where: any = { status: 'available' };
+    const where: any = {
+      status: {
+        in: ['available', 'occupied'],
+      },
+    };
 
     if (capacity) {
       where.capacity = {
@@ -72,6 +76,7 @@ export class TablesService {
     return tables.map((table) => ({
       ...table,
       table_id: table.table_id.toString(),
+      is_occupied: table.status === 'occupied',
     }));
   }
 
@@ -260,7 +265,11 @@ export class TablesService {
     const table = await this.findOne(id);
 
     if (table.status === 'occupied') {
-      throw new BadRequestException('Table is already occupied');
+      return {
+        ...table,
+        table_id: table.table_id.toString(),
+        message: 'Table is already occupied, but you can still order',
+      };
     }
 
     if (table.status !== 'available') {

@@ -126,4 +126,14 @@ export class CreatePromotionDto {
   @IsString()
   @IsOptional()
   product_categories?: string;
+
+  @ApiPropertyOptional({
+    description: 'Maximum number of times a single user can use this promotion',
+    example: 1,
+    default: 1,
+  })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  user_usage_limit?: number;
 }

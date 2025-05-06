@@ -250,6 +250,7 @@ model Promotion {
   status             String           @default("active")
   promotion_id       BigInt           @unique
   usage_limit        Int?
+  user_usage_limit   Int?             @default(1)
   product_categories String?
   orders             Order[]
   promotionUsages    PromotionUsage[]

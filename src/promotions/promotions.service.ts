@@ -321,10 +321,18 @@ export class PromotionsService {
           (usage) => usage.user_id === userId,
         );
         if (userUsage) {
-          return {
-            valid: false,
-            message: 'You have already used this promotion',
-          };
+          const userUsageLimit = promotion.user_usage_limit || 1;
+
+          const userUsageCount = promotion.promotionUsages.filter(
+            (usage) => usage.user_id === userId,
+          ).length;
+
+          if (userUsageCount >= userUsageLimit) {
+            return {
+              valid: false,
+              message: `You have already used this promotion ${userUsageCount} time(s). Maximum allowed: ${userUsageLimit}`,
+            };
+          }
         }
       }
 
