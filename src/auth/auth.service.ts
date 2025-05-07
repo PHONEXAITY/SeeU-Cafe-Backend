@@ -45,7 +45,7 @@ export class AuthService {
     const user = await this.validateUser(loginDto.email, loginDto.password);
 
     if (!user) {
-      throw new UnauthorizedException('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      throw new UnauthorizedException('ອີເມວ ຫຼື ລະຫັດຜ່ານ ບໍ່ຖືກຕ້ອງ');
     }
 
     const payload = {
@@ -245,7 +245,7 @@ export class AuthService {
     );
   }
 
-  private setTokenCookie(response: Response, token: string, sessionId: string) {
+  public setTokenCookie(response: Response, token: string, sessionId: string) {
     const secure = this.configService.get<string>('NODE_ENV') === 'production';
     const domain = this.configService.get<string>('COOKIE_DOMAIN');
     const maxAge =
