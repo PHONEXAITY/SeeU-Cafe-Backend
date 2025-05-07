@@ -36,11 +36,6 @@ export class SocialAuthController {
 
   @Post('google')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Sign in with Google' })
-  @ApiResponse({ status: 200, description: 'Login successful' })
-  @ApiResponse({ status: 400, description: 'Invalid token' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiBody({ type: GoogleAuthDto })
   async googleLogin(
     @Body() googleAuthDto: GoogleAuthDto,
     @Res({ passthrough: true }) response: Response,

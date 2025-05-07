@@ -131,16 +131,26 @@ export class SocialAuthService {
         'GOOGLE_CLIENT_SECRET',
       );
 
+      console.log('Verifying Google token with params:', {
+        code: token,
+        client_id: clientId,
+        client_secret: clientSecret ? '***' : undefined,
+        redirect_uri: 'http://localhost:3001/auth/google/callback',
+        grant_type: 'authorization_code',
+      });
+
       const response = await axios.post<GoogleTokenResponse>(
         'https://oauth2.googleapis.com/token',
         {
           code: token,
           client_id: clientId,
           client_secret: clientSecret,
-          redirect_uri: 'http://localhost:3000/auth/google/callback',
+          redirect_uri: 'http://localhost:3001/auth/google/callback',
           grant_type: 'authorization_code',
         },
       );
+
+      console.log('Google token response:', response.data);
 
       const accessToken = response.data.access_token;
       const userInfoResponse = await axios.get<GoogleUserInfo>(
@@ -150,9 +160,15 @@ export class SocialAuthService {
         },
       );
 
+      console.log('Google user info:', userInfoResponse.data);
+
       return userInfoResponse.data;
-    } catch (error) {
-      console.error('Google token verification error:', error);
+    } catch (error: any) {
+      console.error('Google token verification error:', {
+        response: error.response?.data,
+        message: error.message,
+        status: error.response?.status,
+      });
       return null;
     }
   }
