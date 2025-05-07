@@ -7,7 +7,7 @@ import { EmailVerificationService } from '../../email-verification/email-verific
 import { AuthService } from '../auth.service';
 import axios from 'axios';
 import * as bcrypt from 'bcrypt';
-import { User } from '../../types/user'; // นำเข้า type
+import { User } from '../../types/user';
 
 interface GoogleUserInfo {
   email: string;
@@ -91,6 +91,37 @@ export class SocialAuthService {
     }
   }
 
+  async disconnectSocial(userId: number, provider: string): Promise<boolean> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      if (user.social_provider !== provider) {
+        throw new Error(`This account is not connected to ${provider}`);
+      }
+
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          social_provider: null,
+          social_id: null,
+        },
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Disconnect social error:', error);
+      throw new Error(
+        `Failed to disconnect ${provider} account: ${error.message}`,
+      );
+    }
+  }
+
   private async verifyGoogleToken(
     token: string,
   ): Promise<GoogleUserInfo | null> {
@@ -100,7 +131,6 @@ export class SocialAuthService {
         'GOOGLE_CLIENT_SECRET',
       );
 
-      // Verify token with Google OAuth
       const response = await axios.post<GoogleTokenResponse>(
         'https://oauth2.googleapis.com/token',
         {

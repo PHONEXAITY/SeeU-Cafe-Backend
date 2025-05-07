@@ -1,4 +1,3 @@
-// src/auth/social/social-auth.controller.ts
 import {
   Controller,
   Post,
@@ -9,6 +8,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   NotFoundException,
+  Req,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
@@ -20,6 +20,14 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyResetTokenDto } from './dto/verify-reset-token.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { UseGuards } from '@nestjs/common';
+import { DisconnectSocialDto } from './dto/disconnect-social.dto';
+import { UserPayload } from '../strategies/jwt.strategy';
+
+interface RequestWithUser extends Request {
+  user: UserPayload;
+}
 
 @ApiTags('Auth - Social & Verification')
 @Controller('auth')
@@ -73,6 +81,41 @@ export class SocialAuthController {
         throw new BadRequestException('Invalid Facebook token');
       }
       throw new UnauthorizedException('Facebook authentication failed');
+    }
+  }
+
+  @Post('disconnect-social')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Disconnect social login' })
+  @ApiResponse({
+    status: 200,
+    description: 'Social account disconnected successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Failed to disconnect social account',
+  })
+  @ApiBody({ type: DisconnectSocialDto })
+  async disconnectSocial(
+    @Req() req: RequestWithUser,
+    @Body() disconnectSocialDto: DisconnectSocialDto,
+  ) {
+    try {
+      const success = await this.socialAuthService.disconnectSocial(
+        req.user.id,
+        disconnectSocialDto.provider,
+      );
+
+      if (!success) {
+        throw new BadRequestException('Failed to disconnect social account');
+      }
+
+      return { message: 'Social account disconnected successfully' };
+    } catch (error) {
+      throw new BadRequestException(
+        error.message || 'Failed to disconnect social account',
+      );
     }
   }
 
