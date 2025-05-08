@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,14 +11,33 @@ export class EmailVerificationService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
+    const emailHost = this.configService.get<string>('EMAIL_HOST');
+    const emailPort = this.configService.get<number>('EMAIL_PORT', 587);
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
+
+    if (!emailHost || !emailUser || !emailPassword) {
+      throw new InternalServerErrorException(
+        'SMTP configuration is incomplete',
+      );
+    }
+
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('EMAIL_HOST'),
-      port: this.configService.get<number>('EMAIL_PORT'),
-      secure: this.configService.get<boolean>('EMAIL_SECURE', true),
+      host: emailHost,
+      port: emailPort,
+      secure: emailPort === 465, // ใช้ SSL/TLS สำหรับพอร์ต 465, STARTTLS สำหรับ 587
       auth: {
-        user: this.configService.get<string>('EMAIL_USER'),
-        pass: this.configService.get<string>('EMAIL_PASSWORD'),
+        user: emailUser,
+        pass: emailPassword,
       },
+    });
+
+    this.transporter.verify((error) => {
+      if (error) {
+        console.error('SMTP connection verification failed:', error);
+      } else {
+        console.log('SMTP connection verified successfully');
+      }
     });
   }
 
@@ -67,8 +86,8 @@ export class EmailVerificationService {
   ): Promise<boolean> {
     try {
       const appName = this.configService.get<string>(
-        'APP_NAME',
-        'Your Application',
+        'SeeU Cafe',
+        'SeeU Cafe Ordering System',
       );
 
       const mailOptions = {
@@ -93,6 +112,7 @@ export class EmailVerificationService {
       };
 
       await this.transporter.sendMail(mailOptions);
+      console.log(`Verification email sent to: ${email}`);
       return true;
     } catch (error) {
       console.error('Error sending verification email:', error);
@@ -155,9 +175,10 @@ export class EmailVerificationService {
     });
 
     if (!user) {
+      console.log(`No user found for email: ${email}`);
       return false;
     }
-
+    console.log(`Found user for email: ${email}, ID: ${user.id}`);
     const token = this.generateResetToken();
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
@@ -177,12 +198,12 @@ export class EmailVerificationService {
     });
 
     const appName = this.configService.get<string>(
-      'APP_NAME',
-      'Your Application',
+      'SeeU Cafe',
+      'SeeU Cafe Ordering System',
     );
     const appUrl = this.configService.get<string>(
       'FRONTEND_URL',
-      'http://localhost:3000',
+      'http://localhost:3001',
     );
 
     const resetLink = `${appUrl}/reset-password/${token}`;
@@ -210,6 +231,7 @@ export class EmailVerificationService {
       };
 
       await this.transporter.sendMail(mailOptions);
+      console.log(`Password reset email sent to: ${email}`);
       return true;
     } catch (error) {
       console.error('Error sending password reset email:', error);

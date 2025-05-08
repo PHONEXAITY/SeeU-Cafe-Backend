@@ -40,8 +40,7 @@ export class CloudinaryController {
   constructor(private readonly cloudinaryService: CloudinaryService) {}
 
   @Post('upload')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'employee')
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Upload an image to Cloudinary' })
   @ApiConsumes('multipart/form-data')

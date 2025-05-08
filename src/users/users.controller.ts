@@ -8,25 +8,38 @@ import {
   Delete,
   UseGuards,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
-import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
+import { UsersService } from './users.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { UserPayload } from '../auth/strategies/jwt.strategy';
+import { User } from '../auth/decorators/user.decorator';
 
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -104,5 +117,67 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'ไม่พบผู้ใช้หรือบทบาท' })
   changeRole(@Param('id') id: string, @Body('role_id') roleId: number) {
     return this.usersService.changeRole(+id, roleId);
+  }
+
+  @Patch('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current user profile' })
+  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async updateProfile(
+    @User() user: UserPayload,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    if (!user || !user.id) {
+      throw new UnauthorizedException(
+        'User not authenticated or user ID not available',
+      );
+    }
+
+    return this.usersService.update(user.id, updateUserDto);
+  }
+
+  @Post('upload-photo')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Upload user profile photo' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Photo uploaded successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadProfilePhoto(
+    @User() user: UserPayload,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!user || !user.id) {
+      throw new UnauthorizedException(
+        'User not authenticated or user ID not available',
+      );
+    }
+
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const uploadResult = await this.cloudinaryService.uploadFile(file);
+
+    await this.usersService.update(Number(user.id), {
+      profile_photo: uploadResult.url,
+    });
+
+    return { url: uploadResult.url };
   }
 }

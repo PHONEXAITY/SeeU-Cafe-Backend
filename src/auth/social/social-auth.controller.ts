@@ -161,17 +161,21 @@ export class SocialAuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset' })
   @ApiResponse({ status: 200, description: 'Password reset email sent' })
-  @ApiResponse({ status: 404, description: 'Email not found' })
+  @ApiResponse({
+    status: 404,
+    description: 'No account found with this email address',
+  })
   @ApiBody({ type: ForgotPasswordDto })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    console.log(
+      `Received forgot-password request for email: ${forgotPasswordDto.email}`,
+    ); // Debug
     const success = await this.socialAuthService.sendPasswordResetEmail(
       forgotPasswordDto.email,
     );
-
     if (!success) {
-      throw new NotFoundException('Email not found');
+      throw new NotFoundException('No account found with this email address');
     }
-
     return { message: 'Password reset instructions sent to your email' };
   }
 
