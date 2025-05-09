@@ -3,6 +3,10 @@ export interface CartItemInput {
   beverageMenuId?: number;
   quantity: number;
   notes?: string;
+  price?: number;
+  options?: {
+    priceType?: 'hot' | 'ice';
+  };
 }
 
 export interface CartItem extends CartItemInput {

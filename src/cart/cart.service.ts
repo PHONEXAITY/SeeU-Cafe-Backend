@@ -10,7 +10,6 @@ import {
 
 interface ItemDetails extends CartItem {
   name?: string;
-  price?: number;
   image?: string | null;
   category?: string;
 }
@@ -44,37 +43,73 @@ export class CartService {
         const details: ItemDetails = { ...item };
 
         if (item.foodMenuId) {
-          const foodItem = await this.prisma.foodMenu.findUnique({
-            where: { id: item.foodMenuId },
-            include: { category: true },
-          });
+          try {
+            const foodItem = await this.prisma.foodMenu.findUnique({
+              where: { id: item.foodMenuId },
+              include: { category: true },
+            });
 
-          if (foodItem) {
-            details.name = foodItem.name;
-            details.price = foodItem.price;
-            details.image = foodItem.image;
-            details.category = foodItem.category?.name;
-            subtotal += foodItem.price * item.quantity;
-          } else {
-            details.name = 'Unknown Item';
+            if (foodItem) {
+              details.name = foodItem.name;
+              details.price = item.price || foodItem.price;
+              details.image = foodItem.image;
+              details.category = foodItem.category?.name;
+              subtotal += (item.price || foodItem.price) * item.quantity;
+            } else {
+              details.name = 'Unknown Food Item';
+              details.price = 0;
+              details.image = null;
+              details.category = 'Unknown';
+              console.warn(`Food item with ID ${item.foodMenuId} not found`);
+            }
+          } catch (error) {
+            console.error(
+              `Error fetching food item ${item.foodMenuId}:`,
+              error,
+            );
+            details.name = 'Error Loading Item';
             details.price = 0;
             details.image = null;
             details.category = 'Unknown';
           }
         } else if (item.beverageMenuId) {
-          const beverageItem = await this.prisma.beverageMenu.findUnique({
-            where: { id: item.beverageMenuId },
-            include: { category: true },
-          });
+          try {
+            const beverageItem = await this.prisma.beverageMenu.findUnique({
+              where: { id: item.beverageMenuId },
+              include: { category: true },
+            });
 
-          if (beverageItem && beverageItem.price !== null) {
-            details.name = beverageItem.name;
-            details.price = beverageItem.price;
-            details.image = beverageItem.image;
-            details.category = beverageItem.category?.name;
-            subtotal += beverageItem.price * item.quantity;
-          } else {
-            details.name = 'Unknown Item';
+            if (beverageItem) {
+              details.name = beverageItem.name;
+              details.price =
+                item.price ||
+                (item.options?.priceType === 'hot' &&
+                beverageItem.hot_price !== null
+                  ? beverageItem.hot_price
+                  : item.options?.priceType === 'ice' &&
+                      beverageItem.ice_price !== null
+                    ? beverageItem.ice_price
+                    : beverageItem.price !== null
+                      ? beverageItem.price
+                      : 0);
+              details.image = beverageItem.image;
+              details.category = beverageItem.category?.name;
+              subtotal += details.price * item.quantity;
+            } else {
+              details.name = 'Unknown Beverage Item';
+              details.price = 0;
+              details.image = null;
+              details.category = 'Unknown';
+              console.warn(
+                `Beverage item with ID ${item.beverageMenuId} not found`,
+              );
+            }
+          } catch (error) {
+            console.error(
+              `Error fetching beverage item ${item.beverageMenuId}:`,
+              error,
+            );
+            details.name = 'Error Loading Item';
             details.price = 0;
             details.image = null;
             details.category = 'Unknown';
@@ -92,11 +127,13 @@ export class CartService {
     };
   }
 
-  async addToCart(userId: number, item: CartItemInput): Promise<CartItem[]> {
+  async addToCart(
+    userId: number,
+    item: CartItemInput & { selectedPriceType?: 'hot' | 'ice' },
+  ): Promise<CartItem[]> {
     const cartKey = this.getCartKey(userId);
     const cart = await this.getCart(userId);
 
-    // Validate that the menu item exists
     if (item.foodMenuId) {
       const foodItem = await this.prisma.foodMenu.findUnique({
         where: { id: item.foodMenuId },
@@ -106,6 +143,7 @@ export class CartService {
           `Food menu item with ID ${item.foodMenuId} not found`,
         );
       }
+      item.price = item.price || foodItem.price;
     } else if (item.beverageMenuId) {
       const beverageItem = await this.prisma.beverageMenu.findUnique({
         where: { id: item.beverageMenuId },
@@ -115,37 +153,49 @@ export class CartService {
           `Beverage menu item with ID ${item.beverageMenuId} not found`,
         );
       }
+      if (item.selectedPriceType === 'hot' && beverageItem.hot_price !== null) {
+        item.price = beverageItem.hot_price;
+      } else if (
+        item.selectedPriceType === 'ice' &&
+        beverageItem.ice_price !== null
+      ) {
+        item.price = beverageItem.ice_price;
+      } else {
+        item.price =
+          item.price || (beverageItem.price !== null ? beverageItem.price : 0);
+      }
     } else {
       throw new NotFoundException(
         'Either foodMenuId or beverageMenuId must be provided',
       );
     }
 
-    // Check if the item is already in the cart
     const existingItemIndex = cart.findIndex(
       (cartItem) =>
         (item.foodMenuId && cartItem.foodMenuId === item.foodMenuId) ||
         (item.beverageMenuId &&
-          cartItem.beverageMenuId === item.beverageMenuId),
+          cartItem.beverageMenuId === item.beverageMenuId &&
+          cartItem.options?.priceType === item.selectedPriceType),
     );
 
     if (existingItemIndex !== -1) {
-      // Update the quantity if the item already exists
       cart[existingItemIndex].quantity += item.quantity;
-
-      // Update notes if provided
       if (item.notes) {
         cart[existingItemIndex].notes = item.notes;
       }
+      if (item.price) {
+        cart[existingItemIndex].price = item.price;
+      }
     } else {
-      // Add new item
       cart.push({
         ...item,
-        id: Date.now().toString() + Math.random().toString(36).substring(2, 9), // Generate a unique ID
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+        options: item.selectedPriceType
+          ? { priceType: item.selectedPriceType }
+          : item.options,
       });
     }
 
-    // Store the updated cart with a TTL of 7 days
     await this.cacheManager.set(cartKey, cart, 7 * 24 * 60 * 60 * 1000);
     return cart;
   }
@@ -165,13 +215,9 @@ export class CartService {
     }
 
     if (quantity <= 0) {
-      // Remove the item if quantity is zero or negative
       cart.splice(itemIndex, 1);
     } else {
-      // Update the quantity
       cart[itemIndex].quantity = quantity;
-
-      // Update notes if provided
       if (notes !== undefined) {
         cart[itemIndex].notes = notes;
       }
@@ -289,10 +335,9 @@ export class CartService {
   ): Promise<CartItem[]> {
     const cartKey = this.getCartKey(userId);
     const currentCart = await this.getCart(userId);
-    const updatedCart = [...currentCart]; // Create a new array to avoid mutating the original
+    const updatedCart = [...currentCart];
 
     for (const item of localCart) {
-      // Check if the item exists in the product database
       let isValid = false;
 
       if (item.foodMenuId) {
@@ -301,6 +346,8 @@ export class CartService {
         });
         if (foodItem && foodItem.status === 'active') {
           isValid = true;
+          item.price =
+            item.price || (foodItem.price !== null ? foodItem.price : 0);
         }
       } else if (item.beverageMenuId) {
         const beverageItem = await this.prisma.beverageMenu.findUnique({
@@ -308,38 +355,39 @@ export class CartService {
         });
         if (beverageItem && beverageItem.status === 'active') {
           isValid = true;
+          item.price =
+            item.price ||
+            (beverageItem.price !== null ? beverageItem.price : 0);
         }
       }
 
-      if (!isValid) continue; // Skip invalid items
+      if (!isValid) continue;
 
-      // Check if the item is already in the cart
       const existingItemIndex = updatedCart.findIndex(
         (cartItem) =>
           (item.foodMenuId && cartItem.foodMenuId === item.foodMenuId) ||
           (item.beverageMenuId &&
-            cartItem.beverageMenuId === item.beverageMenuId),
+            cartItem.beverageMenuId === item.beverageMenuId &&
+            cartItem.options?.priceType === item.options?.priceType),
       );
 
       if (existingItemIndex !== -1) {
-        // Update the quantity if the item already exists
         updatedCart[existingItemIndex].quantity += item.quantity;
-
-        // Update notes if provided
         if (item.notes) {
           updatedCart[existingItemIndex].notes = item.notes;
         }
+        if (item.price) {
+          updatedCart[existingItemIndex].price = item.price;
+        }
       } else {
-        // Add new item
         updatedCart.push({
           ...item,
           id:
-            Date.now().toString() + Math.random().toString(36).substring(2, 9), // Generate a unique ID
+            Date.now().toString() + Math.random().toString(36).substring(2, 9),
         });
       }
     }
 
-    // Store the updated cart with a TTL of 7 days
     await this.cacheManager.set(cartKey, updatedCart, 7 * 24 * 60 * 60 * 1000);
     return updatedCart;
   }

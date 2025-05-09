@@ -61,7 +61,6 @@ export class PromotionsService {
 
   async findAll(status?: string) {
     const cacheKey = `promotions:all:${status || 'all'}`;
-
     const cachedPromotions =
       await this.cacheManager.get<Array<Promotion & { promotion_id: string }>>(
         cacheKey,
@@ -225,7 +224,6 @@ export class PromotionsService {
     });
 
     await this.clearPromotionCaches();
-
     await this.cacheManager.del(`promotion:id:${id}`);
     if (updatedPromotion.code) {
       await this.cacheManager.del(`promotion:code:${updatedPromotion.code}`);
@@ -259,7 +257,6 @@ export class PromotionsService {
     });
 
     await this.clearPromotionCaches();
-
     await this.cacheManager.del(`promotion:id:${id}`);
     if (promotion.code) {
       await this.cacheManager.del(`promotion:code:${promotion.code}`);
@@ -281,7 +278,28 @@ export class PromotionsService {
         return cachedValidation;
       }
 
-      const promotion = await this.findByCode(code);
+      const promotion = await this.prisma.promotion.findUnique({
+        where: { code },
+        include: {
+          orders: true,
+          promotionUsages: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!promotion) {
+        return { valid: false, message: 'Promotion not found' };
+      }
 
       if (promotion.status !== 'active') {
         return { valid: false, message: 'Promotion is not active' };
@@ -307,7 +325,9 @@ export class PromotionsService {
       }
 
       if (promotion.usage_limit !== null) {
-        const usageCount = promotion.promotionUsages.length;
+        const usageCount = await this.prisma.promotionUsage.count({
+          where: { promotion_id: promotion.id },
+        });
         if (usageCount >= promotion.usage_limit) {
           return {
             valid: false,
@@ -317,22 +337,18 @@ export class PromotionsService {
       }
 
       if (userId !== undefined) {
-        const userUsage = promotion.promotionUsages.find(
-          (usage) => usage.user_id === userId,
-        );
-        if (userUsage) {
-          const userUsageLimit = promotion.user_usage_limit || 1;
-
-          const userUsageCount = promotion.promotionUsages.filter(
-            (usage) => usage.user_id === userId,
-          ).length;
-
-          if (userUsageCount >= userUsageLimit) {
-            return {
-              valid: false,
-              message: `You have already used this promotion ${userUsageCount} time(s). Maximum allowed: ${userUsageLimit}`,
-            };
-          }
+        const userUsageCount = await this.prisma.promotionUsage.count({
+          where: {
+            promotion_id: promotion.id,
+            user_id: userId,
+          },
+        });
+        const userUsageLimit = promotion.user_usage_limit || 1;
+        if (userUsageCount >= userUsageLimit) {
+          return {
+            valid: false,
+            message: `You have already used this promotion ${userUsageCount} time(s). Maximum allowed: ${userUsageLimit}`,
+          };
         }
       }
 
@@ -371,6 +387,23 @@ export class PromotionsService {
         valid: false,
         message: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  async recordUsage(promotionId: number, userId: number): Promise<void> {
+    try {
+      await this.prisma.promotionUsage.create({
+        data: {
+          promotion_id: promotionId,
+          user_id: userId,
+          used_at: new Date(),
+        },
+      });
+      await this.clearPromotionCaches();
+      await this.cacheManager.del(`promotion:id:${promotionId}`);
+    } catch (error) {
+      throw new BadRequestException('Failed to record promotion usage');
+      console.log(error);
     }
   }
 

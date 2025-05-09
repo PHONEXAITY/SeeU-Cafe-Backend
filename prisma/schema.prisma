@@ -294,8 +294,7 @@ model PromotionUsage {
   promotion    Promotion @relation(fields: [promotion_id], references: [id])
   user         User      @relation(fields: [user_id], references: [id])
 
-  @@index([promotion_id])
-  @@index([user_id])
+@@index([promotion_id, user_id])
 }
 
 model CustomerNotification {

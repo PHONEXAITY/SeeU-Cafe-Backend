@@ -22,6 +22,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiQuery,
+  ApiBody,
 } from '@nestjs/swagger';
 
 @ApiTags('Promotions')
@@ -79,6 +80,31 @@ export class PromotionsController {
     @Body('amount') amount?: number,
   ): Promise<PromotionValidationResult> {
     return this.promotionsService.validatePromotion(code, userId, amount);
+  }
+
+  @Post('usage')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Record promotion usage' })
+  @ApiResponse({ status: 201, description: 'Promotion usage recorded' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        promotionId: { type: 'number' },
+        userId: { type: 'number' },
+      },
+      required: ['promotionId', 'userId'],
+    },
+  })
+  async recordUsage(
+    @Body('promotionId') promotionId: number,
+    @Body('userId') userId: number,
+  ) {
+    await this.promotionsService.recordUsage(promotionId, userId);
+    return { message: 'Promotion usage recorded successfully' };
   }
 
   @Patch(':id')
