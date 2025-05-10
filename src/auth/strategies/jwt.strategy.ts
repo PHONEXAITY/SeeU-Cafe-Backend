@@ -28,50 +28,43 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly prisma: PrismaService,
   ) {
     super({
-      jwtFromRequest: (req: Request): string | null => {
-        if (req?.cookies?.auth_token) {
-          return req.cookies.auth_token as string;
-        }
-        if (req?.cookies?.access_token) {
-          return req.cookies.access_token as string;
-        }
-
-        const bearerToken: string | null | undefined =
-          ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-        return bearerToken ?? null;
-      },
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (req: Request) => {
+          let token = null;
+          if (req && req.cookies) {
+            token = req.cookies['auth_token'];
+          }
+          return token;
+        },
+      ]),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('JWT_SECRET'),
     });
   }
 
   async validate(payload: JwtPayload): Promise<UserPayload> {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-        include: {
-          role: true,
-        },
-      });
+    console.log('JWT Payload:', payload);
+    console.log('Searching for user with ID:', payload.sub);
 
-      if (!user) {
-        console.log(`User not found with ID ${payload.sub}`);
-        throw new UnauthorizedException('Authentication failed');
-      }
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { role: true },
+    });
 
-      const result: UserPayload = {
-        id: user.id,
-        email: user.email,
-        role: user.role?.name || 'customer',
-        first_name: user.first_name,
-        last_name: user.last_name,
-      };
-      console.log('JWT validation result:', result);
-
-      return result;
-    } catch (error) {
-      console.error('JWT validation error:', error);
-      throw new UnauthorizedException('Authentication failed');
+    if (!user) {
+      console.log('User not found!');
+      throw new UnauthorizedException('User not found');
     }
+
+    console.log('User found:', user.id, user.email, user.role?.name);
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role?.name || 'customer',
+      first_name: user.first_name,
+      last_name: user.last_name,
+    };
   }
 }
