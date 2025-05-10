@@ -340,7 +340,7 @@ export class PromotionsService {
         const userUsageCount = await this.prisma.promotionUsage.count({
           where: {
             promotion_id: promotion.id,
-            user_id: userId,
+            user_id: Number(userId),
           },
         });
         const userUsageLimit = promotion.user_usage_limit || 1;
@@ -383,6 +383,7 @@ export class PromotionsService {
 
       return result;
     } catch (error) {
+      console.error('Promotion validation error:', error);
       return {
         valid: false,
         message: error instanceof Error ? error.message : String(error),
@@ -392,18 +393,52 @@ export class PromotionsService {
 
   async recordUsage(promotionId: number, userId: number): Promise<void> {
     try {
+      const parsedPromotionId = Number(promotionId);
+      const parsedUserId = Number(userId);
+
+      const existingUsage = await this.prisma.promotionUsage.findFirst({
+        where: {
+          promotion_id: parsedPromotionId,
+          user_id: parsedUserId,
+        },
+      });
+
+      if (existingUsage) {
+        throw new BadRequestException('You have already used this promotion');
+      }
+
       await this.prisma.promotionUsage.create({
         data: {
-          promotion_id: promotionId,
-          user_id: userId,
+          promotion_id: parsedPromotionId,
+          user_id: parsedUserId,
           used_at: new Date(),
         },
       });
+
       await this.clearPromotionCaches();
       await this.cacheManager.del(`promotion:id:${promotionId}`);
     } catch (error) {
+      console.error('Error recording promotion usage:', error);
       throw new BadRequestException('Failed to record promotion usage');
-      console.log(error);
+    }
+  }
+
+  async isPromotionUsedByUser(
+    promotionId: number,
+    userId: number,
+  ): Promise<boolean> {
+    try {
+      const usageCount = await this.prisma.promotionUsage.count({
+        where: {
+          promotion_id: Number(promotionId),
+          user_id: Number(userId),
+        },
+      });
+
+      return usageCount > 0;
+    } catch (error) {
+      console.error('Error checking promotion usage:', error);
+      return false;
     }
   }
 

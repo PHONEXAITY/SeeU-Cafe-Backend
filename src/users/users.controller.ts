@@ -139,6 +139,33 @@ export class UsersController {
     return this.usersService.update(user.id, updateUserDto);
   }
 
+  @Patch('my-profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update own profile' })
+  async updateMyProfile(
+    @User() user: UserPayload,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    if (!user || !user.id) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const allowedFields = {
+      first_name: updateUserDto.first_name,
+      last_name: updateUserDto.last_name,
+      phone: updateUserDto.phone,
+      address: updateUserDto.address,
+      profile_photo: updateUserDto.profile_photo,
+    };
+
+    const filteredData = Object.fromEntries(
+      Object.entries(allowedFields).filter(([_, value]) => value !== undefined),
+    );
+
+    return this.usersService.update(user.id, filteredData);
+  }
+
   @Post('upload-photo')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

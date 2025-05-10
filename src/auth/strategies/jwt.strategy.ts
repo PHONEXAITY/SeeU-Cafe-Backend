@@ -55,22 +55,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
 
       if (!user) {
-        console.log(`ไม่พบผู้ใช้ที่มี ID ${payload.sub} ในฐานข้อมูล`);
-        throw new UnauthorizedException(`การยืนยันตัวตนล้มเหลว`);
+        console.log(`User not found with ID ${payload.sub}`);
+        throw new UnauthorizedException('Authentication failed');
       }
 
       const result: UserPayload = {
         id: user.id,
         email: user.email,
-        role: user.role?.name || 'guest',
+        role: user.role?.name || 'customer',
         first_name: user.first_name,
         last_name: user.last_name,
       };
+      console.log('JWT validation result:', result);
 
       return result;
     } catch (error) {
       console.error('JWT validation error:', error);
-      throw new UnauthorizedException('การยืนยันตัวตนล้มเหลว');
+      throw new UnauthorizedException('Authentication failed');
     }
   }
 }

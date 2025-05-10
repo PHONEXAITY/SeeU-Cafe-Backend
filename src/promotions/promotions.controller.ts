@@ -23,6 +23,7 @@ import {
   ApiBearerAuth,
   ApiQuery,
   ApiBody,
+  ApiParam,
 } from '@nestjs/swagger';
 
 @ApiTags('Promotions')
@@ -80,6 +81,22 @@ export class PromotionsController {
     @Body('amount') amount?: number,
   ): Promise<PromotionValidationResult> {
     return this.promotionsService.validatePromotion(code, userId, amount);
+  }
+
+  @Get(':id/usage/:userId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Check if user has used a promotion' })
+  @ApiParam({ name: 'id', description: 'Promotion ID' })
+  @ApiParam({ name: 'userId', description: 'User ID' })
+  @ApiResponse({ status: 200, description: 'Usage check result' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async checkUsage(@Param('id') id: string, @Param('userId') userId: string) {
+    const used = await this.promotionsService.isPromotionUsedByUser(
+      +id,
+      +userId,
+    );
+    return { used };
   }
 
   @Post('usage')
