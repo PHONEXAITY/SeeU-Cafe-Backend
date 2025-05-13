@@ -149,6 +149,10 @@ model Delivery {
   delivery_fee             Float?
   estimated_delivery_time  DateTime?
   pickup_from_kitchen_time DateTime?
+  last_latitude            Float?
+  last_longitude           Float?
+  last_location_update     DateTime?
+  location_history         Json?
   employee                 Employee? @relation(fields: [employee_id], references: [id])
   order                    Order     @relation(fields: [order_id], references: [id])
 

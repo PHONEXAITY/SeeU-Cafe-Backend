@@ -13,6 +13,7 @@ import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -24,7 +25,13 @@ import {
   ApiQuery,
   ApiBody,
 } from '@nestjs/swagger';
-
+import { LocationHistoryEntry } from './interface/types';
+class LocationHistoryResponse {
+  id: number;
+  order_id: number;
+  status: string;
+  locationHistory: LocationHistoryEntry[];
+}
 @ApiTags('Deliveries')
 @Controller('deliveries')
 @UseGuards(JwtAuthGuard)
@@ -88,6 +95,32 @@ export class DeliveriesController {
   @ApiResponse({ status: 404, description: 'Delivery not found' })
   findByOrderId(@Param('orderId') orderId: string) {
     return this.deliveriesService.findByOrderId(+orderId);
+  }
+
+  @Get(':id/location')
+  @ApiOperation({ summary: 'Get the current location of a delivery' })
+  @ApiResponse({ status: 200, description: 'Delivery location details' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Delivery not found' })
+  getLocation(@Param('id') id: string) {
+    return this.deliveriesService.getLocation(+id);
+  }
+
+  @Get(':id/location-history')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'employee')
+  @ApiOperation({
+    summary: 'Get the location history of a delivery (Admin or Employee)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Delivery location history',
+    type: LocationHistoryResponse,
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Delivery not found' })
+  getLocationHistory(@Param('id') id: string) {
+    return this.deliveriesService.getLocationHistory(+id);
   }
 
   @Patch(':id')
@@ -157,6 +190,24 @@ export class DeliveriesController {
     @Body() updateTimeDto: UpdateDeliveryTimeDto,
   ) {
     return this.deliveriesService.updateTime(+id, updateTimeDto);
+  }
+
+  @Patch(':id/location')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'employee')
+  @ApiOperation({ summary: 'Update delivery location (Admin or Employee)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Delivery location updated successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Delivery not found' })
+  updateLocation(
+    @Param('id') id: string,
+    @Body() updateLocationDto: UpdateLocationDto,
+  ) {
+    return this.deliveriesService.updateLocation(+id, updateLocationDto);
   }
 
   @Delete(':id')

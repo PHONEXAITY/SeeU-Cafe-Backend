@@ -9,7 +9,17 @@ import { CustomerNotificationsService } from '../customer-notifications/customer
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { Prisma } from '@prisma/client';
+import { LocationHistoryEntry } from './interface/types';
+
+/* interface LocationHistoryEntry {
+  latitude: number;
+  longitude: number;
+  timestamp: Date | null;
+  note?: string;
+  current?: boolean; // For getLocationHistory method
+} */
 
 @Injectable()
 export class DeliveriesService {
@@ -17,6 +27,7 @@ export class DeliveriesService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: CustomerNotificationsService,
   ) {}
+
   private async createDeliveryNotification(
     orderId: number,
     status: string,
@@ -81,6 +92,7 @@ export class DeliveriesService {
       console.error('Failed to create delivery notification:', error);
     }
   }
+
   async create(createDeliveryDto: CreateDeliveryDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: createDeliveryDto.order_id },
@@ -643,6 +655,213 @@ export class DeliveriesService {
     return {
       ...updatedDelivery,
       delivery_id: updatedDelivery.delivery_id.toString(),
+    };
+  }
+
+  async updateLocation(id: number, updateLocationDto: UpdateLocationDto) {
+    const delivery = await this.findOne(id);
+
+    if (delivery.status !== 'out_for_delivery') {
+      throw new BadRequestException(
+        'Location can only be updated for deliveries that are out for delivery',
+      );
+    }
+
+    let locationHistory: LocationHistoryEntry[] = [];
+    if (delivery.location_history) {
+      try {
+        locationHistory = JSON.parse(
+          delivery.location_history as string,
+        ) as LocationHistoryEntry[];
+      } catch {
+        locationHistory = [];
+      }
+    }
+
+    if (delivery.last_latitude && delivery.last_longitude) {
+      locationHistory.push({
+        latitude: delivery.last_latitude,
+        longitude: delivery.last_longitude,
+        timestamp: delivery.last_location_update,
+        note: updateLocationDto.locationNote || '',
+      });
+    }
+
+    const now = new Date();
+    const updatedDelivery = await this.prisma.delivery.update({
+      where: { id },
+      data: {
+        last_latitude: updateLocationDto.latitude,
+        last_longitude: updateLocationDto.longitude,
+        last_location_update: now,
+        location_history:
+          locationHistory.length > 0
+            ? JSON.stringify(locationHistory)
+            : undefined,
+      },
+      include: {
+        order: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+        employee: true,
+      },
+    });
+
+    if (updateLocationDto.notifyCustomer && updatedDelivery.order?.user?.id) {
+      const employeeName = updatedDelivery.employee
+        ? `${updatedDelivery.employee.first_name || ''} ${updatedDelivery.employee.last_name || ''}`.trim()
+        : 'The delivery person';
+
+      const message = `${employeeName} has updated their location for your order #${updatedDelivery.order.order_id}. You can track the delivery on the map.`;
+
+      await this.notificationsService.create({
+        user_id: updatedDelivery.order.user.id,
+        order_id: updatedDelivery.order_id,
+        message,
+        type: 'location_update',
+        action_url: `/delivery/${updatedDelivery.id}/track`,
+        read: false,
+      });
+    }
+
+    return {
+      ...updatedDelivery,
+      delivery_id: updatedDelivery.delivery_id.toString(),
+      location: {
+        latitude: updatedDelivery.last_latitude,
+        longitude: updatedDelivery.last_longitude,
+        lastUpdate: updatedDelivery.last_location_update,
+      },
+    };
+  }
+
+  // Method to get the current location of a delivery
+  async getLocation(id: number) {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        order_id: true,
+        last_latitude: true,
+        last_longitude: true,
+        last_location_update: true,
+        status: true,
+        delivery_address: true,
+        employee_id: true,
+        employee: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            phone: true,
+          },
+        },
+        order: {
+          select: {
+            order_id: true,
+            User_id: true,
+            user: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!delivery) {
+      throw new NotFoundException(`Delivery with ID ${id} not found`);
+    }
+
+    if (!delivery.last_latitude || !delivery.last_longitude) {
+      return {
+        id: delivery.id,
+        order_id: delivery.order_id,
+        location: null,
+        message: 'No location data available for this delivery yet.',
+        status: delivery.status,
+        delivery_address: delivery.delivery_address,
+        employee: delivery.employee,
+        order: delivery.order,
+      };
+    }
+
+    return {
+      id: delivery.id,
+      order_id: delivery.order_id,
+      location: {
+        latitude: delivery.last_latitude,
+        longitude: delivery.last_longitude,
+        lastUpdate: delivery.last_location_update,
+      },
+      status: delivery.status,
+      delivery_address: delivery.delivery_address,
+      employee: delivery.employee,
+      order: delivery.order,
+    };
+  }
+
+  async getLocationHistory(id: number) {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        order_id: true,
+        location_history: true,
+        status: true,
+      },
+    });
+
+    if (!delivery) {
+      throw new NotFoundException(`Delivery with ID ${id} not found`);
+    }
+
+    let locationHistory: LocationHistoryEntry[] = [];
+    if (delivery.location_history) {
+      try {
+        locationHistory = JSON.parse(
+          delivery.location_history as string,
+        ) as LocationHistoryEntry[];
+      } catch {
+        locationHistory = [];
+      }
+    }
+
+    const currentDelivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      select: {
+        last_latitude: true,
+        last_longitude: true,
+        last_location_update: true,
+      },
+    });
+
+    if (currentDelivery?.last_latitude && currentDelivery?.last_longitude) {
+      locationHistory.push({
+        latitude: currentDelivery.last_latitude,
+        longitude: currentDelivery.last_longitude,
+        timestamp: currentDelivery.last_location_update,
+        current: true,
+      });
+    }
+
+    return {
+      id: delivery.id,
+      order_id: delivery.order_id,
+      status: delivery.status,
+      locationHistory,
     };
   }
 
