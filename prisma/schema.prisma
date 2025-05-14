@@ -153,6 +153,7 @@ model Delivery {
   last_longitude           Float?
   last_location_update     DateTime?
   location_history         Json?
+  notes                String?
   employee                 Employee? @relation(fields: [employee_id], references: [id])
   order                    Order     @relation(fields: [order_id], references: [id])
 

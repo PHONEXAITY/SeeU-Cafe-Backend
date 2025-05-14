@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
@@ -31,6 +32,11 @@ class LocationHistoryResponse {
   order_id: number;
   status: string;
   locationHistory: LocationHistoryEntry[];
+}
+
+class UpdateStatusDto {
+  status: string;
+  notes?: string;
 }
 @ApiTags('Deliveries')
 @Controller('deliveries')
@@ -149,29 +155,26 @@ export class DeliveriesController {
     status: 200,
     description: 'Delivery status updated successfully',
   })
+  @ApiResponse({ status: 400, description: 'Invalid status or payload' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Delivery not found' })
   @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          example: 'out_for_delivery',
-          enum: [
-            'pending',
-            'preparing',
-            'out_for_delivery',
-            'delivered',
-            'cancelled',
-          ],
-        },
+    type: UpdateStatusDto,
+    description: 'Status update payload',
+    examples: {
+      example1: {
+        value: { status: 'out_for_delivery', notes: 'Picked up by driver' },
       },
-      required: ['status'],
     },
   })
-  updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.deliveriesService.updateStatus(+id, status);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() updateStatusDto: UpdateStatusDto,
+  ) {
+    if (!updateStatusDto.status) {
+      throw new BadRequestException('Status is required');
+    }
+    return this.deliveriesService.updateStatus(+id, updateStatusDto);
   }
 
   @Patch(':id/time')

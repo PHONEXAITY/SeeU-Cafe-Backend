@@ -13,13 +13,10 @@ import { UpdateLocationDto } from './dto/update-location.dto';
 import { Prisma } from '@prisma/client';
 import { LocationHistoryEntry } from './interface/types';
 
-/* interface LocationHistoryEntry {
-  latitude: number;
-  longitude: number;
-  timestamp: Date | null;
-  note?: string;
-  current?: boolean; // For getLocationHistory method
-} */
+interface UpdateStatusDto {
+  status: string;
+  notes?: string;
+}
 
 @Injectable()
 export class DeliveriesService {
@@ -486,20 +483,58 @@ export class DeliveriesService {
     };
   }
 
-  async updateStatus(id: number, status: string) {
+  async updateStatus(id: number, updateStatusDto: UpdateStatusDto) {
+    const { status, notes } = updateStatusDto;
+
+    // Validate status
+    const validStatuses = [
+      'pending',
+      'preparing',
+      'out_for_delivery',
+      'delivered',
+      'cancelled',
+    ];
+    if (!validStatuses.includes(status)) {
+      throw new BadRequestException(
+        `Invalid status: ${status}. Must be one of ${validStatuses.join(', ')}`,
+      );
+    }
+
     const delivery = await this.findOne(id);
+
+    // Optional: Enforce status transitions
+    const validTransitions = {
+      pending: ['preparing', 'cancelled'],
+      preparing: ['out_for_delivery', 'cancelled'],
+      out_for_delivery: ['delivered', 'cancelled'],
+      delivered: [],
+      cancelled: [],
+    };
+    if (!validTransitions[delivery.status].includes(status)) {
+      throw new BadRequestException(
+        `Cannot transition from ${delivery.status} to ${status}`,
+      );
+    }
+
+    // Check if employee_id is required for out_for_delivery
+    if (status === 'out_for_delivery' && !delivery.employee_id) {
+      throw new BadRequestException(
+        'Employee ID is required for out_for_delivery status',
+      );
+    }
 
     const updatedDelivery = await this.prisma.delivery.update({
       where: { id },
-      data: { status },
+      data: updateStatusDto,
     });
+
     if (status !== delivery.status) {
       const estimatedTime = delivery.estimated_delivery_time || undefined;
-
       await this.createDeliveryNotification(
         delivery.order_id,
         status,
         estimatedTime,
+        notes,
       );
     }
 
@@ -511,7 +546,6 @@ export class DeliveriesService {
       });
 
       const orderData = delivery.order;
-
       await this.prisma.order.update({
         where: { id: delivery.order_id },
         data: { status: 'delivered' },
@@ -522,7 +556,7 @@ export class DeliveriesService {
           order_id: delivery.order_id,
           status: 'delivered',
           employee_id: delivery.employee_id,
-          notes: 'Order delivered to customer',
+          notes: notes || 'Order delivered to customer',
           timestamp: now,
         },
       });
@@ -530,23 +564,18 @@ export class DeliveriesService {
       if (orderData?.User_id) {
         const orderDetails = await this.prisma.orderDetail.findMany({
           where: { order_id: delivery.order_id },
-          include: {
-            food_menu: true,
-            beverage_menu: true,
-          },
+          include: { food_menu: true, beverage_menu: true },
         });
 
-        const items = orderDetails.map((detail) => {
-          return {
-            name:
-              detail.food_menu?.name ||
-              detail.beverage_menu?.name ||
-              'Unknown Item',
-            quantity: detail.quantity,
-            price: detail.price,
-            notes: detail.notes,
-          };
-        });
+        const items = orderDetails.map((detail) => ({
+          name:
+            detail.food_menu?.name ||
+            detail.beverage_menu?.name ||
+            'Unknown Item',
+          quantity: detail.quantity,
+          price: detail.price,
+          notes: detail.notes,
+        }));
 
         await this.prisma.orderHistory.create({
           data: {
@@ -578,7 +607,7 @@ export class DeliveriesService {
           order_id: delivery.order_id,
           status: 'out_for_delivery',
           employee_id: delivery.employee_id,
-          notes: 'Order picked up from kitchen for delivery',
+          notes: notes || 'Order picked up from kitchen for delivery',
         },
       });
     }
