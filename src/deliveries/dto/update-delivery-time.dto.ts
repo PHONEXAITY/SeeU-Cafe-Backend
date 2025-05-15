@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsDate,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -8,7 +8,6 @@ import {
   IsString,
   IsBoolean,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export class UpdateDeliveryTimeDto {
   @ApiProperty({
@@ -21,13 +20,12 @@ export class UpdateDeliveryTimeDto {
   timeType: string;
 
   @ApiProperty({
-    description: 'New time value',
-    example: '2023-01-01T12:00:00Z',
+    description: 'New time value (ISO 8601 format)',
+    example: '2025-05-15T16:00:00Z',
   })
   @IsNotEmpty()
-  @IsDate()
-  @Type(() => Date)
-  newTime: Date;
+  @IsDateString()
+  newTime: string;
 
   @ApiProperty({
     description: 'Reason for time update',

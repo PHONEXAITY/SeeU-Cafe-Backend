@@ -14,6 +14,7 @@ import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
+import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -26,18 +27,16 @@ import {
   ApiQuery,
   ApiBody,
 } from '@nestjs/swagger';
+import { DeliveryStatus } from './enums/delivery-status.enum';
 import { LocationHistoryEntry } from './interface/types';
+
 class LocationHistoryResponse {
   id: number;
   order_id: number;
-  status: string;
+  status: DeliveryStatus;
   locationHistory: LocationHistoryEntry[];
 }
 
-class UpdateStatusDto {
-  status: string;
-  notes?: string;
-}
 @ApiTags('Deliveries')
 @Controller('deliveries')
 @UseGuards(JwtAuthGuard)
@@ -66,21 +65,32 @@ export class DeliveriesController {
   @ApiQuery({
     name: 'status',
     required: false,
-    description: 'Filter by status',
+    enum: DeliveryStatus,
+    description: 'Filter by delivery status',
   })
   @ApiQuery({
     name: 'employeeId',
     required: false,
+    type: Number,
     description: 'Filter by employee ID',
   })
   @ApiResponse({ status: 200, description: 'List of deliveries' })
+  @ApiResponse({ status: 400, description: 'Invalid status' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   findAll(
     @Query('status') status?: string,
     @Query('employeeId') employeeId?: string,
   ) {
+    if (
+      status &&
+      !Object.values(DeliveryStatus).includes(status as DeliveryStatus)
+    ) {
+      throw new BadRequestException(
+        `Status must be one of ${Object.values(DeliveryStatus).join(', ')}`,
+      );
+    }
     return this.deliveriesService.findAll(
-      status,
+      status as DeliveryStatus | undefined,
       employeeId ? +employeeId : undefined,
     );
   }
@@ -163,7 +173,10 @@ export class DeliveriesController {
     description: 'Status update payload',
     examples: {
       example1: {
-        value: { status: 'out_for_delivery', notes: 'Picked up by driver' },
+        value: {
+          status: DeliveryStatus.PREPARING,
+          notes: 'Order is being prepared',
+        },
       },
     },
   })
@@ -171,9 +184,6 @@ export class DeliveriesController {
     @Param('id') id: string,
     @Body() updateStatusDto: UpdateStatusDto,
   ) {
-    if (!updateStatusDto.status) {
-      throw new BadRequestException('Status is required');
-    }
     return this.deliveriesService.updateStatus(+id, updateStatusDto);
   }
 
@@ -216,7 +226,6 @@ export class DeliveriesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('admin')
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a delivery (Admin only)' })
   @ApiResponse({ status: 200, description: 'Delivery deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

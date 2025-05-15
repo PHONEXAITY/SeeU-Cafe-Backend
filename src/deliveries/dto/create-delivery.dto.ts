@@ -9,14 +9,7 @@ import {
   IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-
-enum DeliveryStatus {
-  PENDING = 'pending',
-  PREPARING = 'preparing',
-  OUT_FOR_DELIVERY = 'out_for_delivery',
-  DELIVERED = 'delivered',
-  CANCELLED = 'cancelled',
-}
+import { DeliveryStatus } from '../enums/delivery-status.enum';
 
 export class CreateDeliveryDto {
   @ApiProperty({
@@ -35,7 +28,7 @@ export class CreateDeliveryDto {
   })
   @IsEnum(DeliveryStatus)
   @IsOptional()
-  status?: string;
+  status?: DeliveryStatus;
 
   @ApiPropertyOptional({
     description: 'Delivery address',
