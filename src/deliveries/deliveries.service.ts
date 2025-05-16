@@ -13,12 +13,31 @@ import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { DeliveryStatus } from './enums/delivery-status.enum';
 import { UpdateLocationDto } from './dto/update-location.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, Delivery } from '@prisma/client';
 import { LocationHistoryEntry } from './interface/types';
 
-/**
- * Service for managing delivery operations
- */
+interface DeliveryWithRelations extends Delivery {
+  order: {
+    id: number;
+    order_id: string;
+    User_id: number | null;
+    create_at: Date;
+    total_price: number;
+    user?: {
+      id: number;
+      email: string;
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null;
+  };
+  employee?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    phone?: string | null;
+  } | null;
+}
+
 @Injectable()
 export class DeliveriesService {
   private readonly logger = new Logger(DeliveriesService.name);
@@ -47,9 +66,6 @@ export class DeliveriesService {
     private readonly notificationsService: CustomerNotificationsService,
   ) {}
 
-  /**
-   * Creates a notification for delivery status updates
-   */
   private async createDeliveryNotification(
     orderId: number,
     status: DeliveryStatus,
@@ -94,9 +110,6 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Generates notification messages based on delivery status
-   */
   private generateStatusNotificationMessage(
     orderNumber: string,
     status: DeliveryStatus,
@@ -118,13 +131,10 @@ export class DeliveriesService {
       case DeliveryStatus.CANCELLED:
         return `Your delivery for order #${orderNumber} has been cancelled. Contact customer service for more information.`;
       default:
-        return `Your delivery for order #${orderNumber} has been updated to status: ${status as string}`;
+        return `Your delivery for order #${orderNumber} has been updated to status: ${String(status)}`;
     }
   }
 
-  /**
-   * Creates a new delivery
-   */
   async create(createDeliveryDto: CreateDeliveryDto) {
     const { order_id, employee_id } = createDeliveryDto;
 
@@ -167,7 +177,7 @@ export class DeliveriesService {
     const deliveryId = BigInt(Date.now());
     const estimatedDeliveryTime = createDeliveryDto.estimated_delivery_time
       ? new Date(createDeliveryDto.estimated_delivery_time)
-      : new Date(Date.now() + 60 * 60 * 1000); // Default: 1 hour from now
+      : new Date(Date.now() + 60 * 60 * 1000);
 
     const status = createDeliveryDto.status ?? DeliveryStatus.PENDING;
 
@@ -185,12 +195,10 @@ export class DeliveriesService {
         },
       });
 
-      // Update order status if delivery is out for delivery
       if (status === DeliveryStatus.OUT_FOR_DELIVERY) {
         await this.updateOrderStatus(order.id, status, employee_id);
       }
 
-      // Notify customer
       await this.createDeliveryNotification(
         order.id,
         status,
@@ -212,9 +220,6 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Updates order status and creates timeline entry
-   */
   private async updateOrderStatus(
     orderId: number,
     status: DeliveryStatus,
@@ -237,9 +242,6 @@ export class DeliveriesService {
     });
   }
 
-  /**
-   * Retrieves all deliveries with optional filters
-   */
   async findAll(status?: DeliveryStatus, employeeId?: number) {
     const where: Prisma.DeliveryWhereInput = {};
 
@@ -290,10 +292,7 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Finds a delivery by its ID
-   */
-  async findOne(id: number) {
+  async findOne(id: number): Promise<DeliveryWithRelations> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
       include: {
@@ -337,13 +336,10 @@ export class DeliveriesService {
 
     return {
       ...delivery,
-      delivery_id: delivery.delivery_id.toString(),
-    };
+      delivery_id: delivery.delivery_id,
+    } as DeliveryWithRelations;
   }
 
-  /**
-   * Finds a delivery by order ID
-   */
   async findByOrderId(orderId: number) {
     const delivery = await this.prisma.delivery.findUnique({
       where: { order_id: orderId },
@@ -392,18 +388,13 @@ export class DeliveriesService {
     };
   }
 
-  /**
-   * Updates a delivery
-   */
   async update(id: number, updateDeliveryDto: UpdateDeliveryDto) {
     const existingDelivery = await this.findOne(id);
 
-    // Validate order if specified
     if (updateDeliveryDto.order_id) {
       await this.validateOrderForDelivery(updateDeliveryDto.order_id, id);
     }
 
-    // Validate employee if specified
     if (updateDeliveryDto.employee_id) {
       await this.validateEmployee(updateDeliveryDto.employee_id);
     }
@@ -426,13 +417,15 @@ export class DeliveriesService {
       });
 
       const updatedStatus = updateDeliveryDto.status;
+      const currentStatus = existingDelivery.status as DeliveryStatus;
 
-      // Handle status change if needed
-      if (updatedStatus && updatedStatus !== existingDelivery.status) {
+      if (updatedStatus && updatedStatus !== currentStatus) {
         await this.handleStatusChange(
           existingDelivery,
-          updatedStatus as DeliveryStatus,
-          updateDeliveryDto.employee_id || existingDelivery.employee_id,
+          updatedStatus,
+          updateDeliveryDto.employee_id ??
+            existingDelivery.employee_id ??
+            undefined,
         );
       }
 
@@ -446,9 +439,6 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Validates an order for delivery
-   */
   private async validateOrderForDelivery(
     orderId: number,
     deliveryId?: number,
@@ -478,9 +468,6 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Validates an employee exists
-   */
   private async validateEmployee(employeeId: number): Promise<void> {
     const employee = await this.prisma.employee.findUnique({
       where: { id: employeeId },
@@ -491,18 +478,14 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Handles the process when delivery status changes
-   */
   private async handleStatusChange(
-    delivery: any,
+    delivery: DeliveryWithRelations,
     newStatus: DeliveryStatus,
     employeeId?: number,
     notes?: string,
   ): Promise<void> {
     const estimatedTime = delivery.estimated_delivery_time || undefined;
 
-    // Notify customer about status change
     await this.createDeliveryNotification(
       delivery.order_id,
       newStatus,
@@ -510,7 +493,6 @@ export class DeliveriesService {
       notes,
     );
 
-    // Create order timeline entry
     await this.prisma.orderTimeline.create({
       data: {
         order_id: delivery.order_id,
@@ -521,47 +503,39 @@ export class DeliveriesService {
       },
     });
 
-    // Handle delivery completion
     if (
       newStatus === DeliveryStatus.DELIVERED &&
-      delivery.status !== DeliveryStatus.DELIVERED
+      (delivery.status as DeliveryStatus) !== DeliveryStatus.DELIVERED
     ) {
       await this.handleDeliveryCompletion(delivery, employeeId, notes);
     }
 
-    // Handle out for delivery status
     if (
       newStatus === DeliveryStatus.OUT_FOR_DELIVERY &&
-      delivery.status !== DeliveryStatus.OUT_FOR_DELIVERY &&
+      (delivery.status as DeliveryStatus) !== DeliveryStatus.OUT_FOR_DELIVERY &&
       !delivery.pickup_from_kitchen_time
     ) {
       await this.handleOutForDelivery(delivery, employeeId, notes);
     }
   }
 
-  /**
-   * Handles processes when a delivery is completed
-   */
   private async handleDeliveryCompletion(
-    delivery: any,
+    delivery: DeliveryWithRelations,
     employeeId?: number,
     notes?: string,
   ): Promise<void> {
     const now = new Date();
 
-    // Update delivery with actual delivery time
     await this.prisma.delivery.update({
       where: { id: delivery.id },
       data: { actual_delivery_time: now },
     });
 
-    // Update order status
     await this.prisma.order.update({
       where: { id: delivery.order_id },
       data: { status: DeliveryStatus.DELIVERED },
     });
 
-    // Add to order timeline
     await this.prisma.orderTimeline.create({
       data: {
         order_id: delivery.order_id,
@@ -572,16 +546,14 @@ export class DeliveriesService {
       },
     });
 
-    // Create order history record
     if (delivery.order?.User_id) {
       await this.createOrderHistory(delivery);
     }
   }
 
-  /**
-   * Creates an order history record for completed deliveries
-   */
-  private async createOrderHistory(delivery: any): Promise<void> {
+  private async createOrderHistory(
+    delivery: DeliveryWithRelations,
+  ): Promise<void> {
     try {
       const orderData = delivery.order;
       const orderDetails = await this.prisma.orderDetail.findMany({
@@ -601,7 +573,7 @@ export class DeliveriesService {
 
       await this.prisma.orderHistory.create({
         data: {
-          user_id: orderData.User_id,
+          user_id: orderData.User_id || 0,
           order_id: orderData.order_id,
           order_date: orderData.create_at,
           total_amount: orderData.total_price,
@@ -619,21 +591,16 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Handles processes when a delivery is out for delivery
-   */
   private async handleOutForDelivery(
-    delivery: any,
+    delivery: DeliveryWithRelations,
     employeeId?: number,
     notes?: string,
   ): Promise<void> {
-    // Update pickup time
     await this.prisma.delivery.update({
       where: { id: delivery.id },
       data: { pickup_from_kitchen_time: new Date() },
     });
 
-    // Add to order timeline
     await this.prisma.orderTimeline.create({
       data: {
         order_id: delivery.order_id,
@@ -645,41 +612,33 @@ export class DeliveriesService {
     });
   }
 
-  /**
-   * Updates the status of a delivery
-   */
   async updateStatus(id: number, updateStatusDto: UpdateStatusDto) {
     try {
       const { status, notes } = updateStatusDto;
       const delivery = await this.findOne(id);
 
-      // Validate status transition
-      if (!this.validStatusTransitions[delivery.status].includes(status)) {
+      const currentStatus = delivery.status as DeliveryStatus;
+
+      if (!this.validStatusTransitions[currentStatus].includes(status)) {
         throw new BadRequestException(
-          `Cannot transition from ${delivery.status} to ${status}`,
+          `Cannot transition from ${currentStatus} to ${status}`,
         );
       }
 
-      // Additional validations for specific statuses
       if (status === DeliveryStatus.OUT_FOR_DELIVERY && !delivery.employee_id) {
         throw new BadRequestException(
           'Employee ID is required for out_for_delivery status',
         );
       }
 
-      // Update the delivery status
       const updatedDelivery = await this.prisma.delivery.update({
         where: { id },
         data: { status, notes },
       });
 
-      if (status !== delivery.status) {
-        await this.handleStatusChange(
-          delivery,
-          status as DeliveryStatus, // Cast to DeliveryStatus
-          updateDeliveryDto.employee_id || delivery.employee_id,
-          notes,
-        );
+      if (status !== currentStatus) {
+        const employeeId = delivery.employee_id ?? undefined;
+        await this.handleStatusChange(delivery, status, employeeId, notes);
       }
 
       return {
@@ -698,14 +657,10 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Updates the estimated delivery or pickup time
-   */
   async updateTime(id: number, updateTimeDto: UpdateDeliveryTimeDto) {
     const delivery = await this.findOne(id);
     const orderData = delivery.order;
 
-    // Store previous time for history
     let previousTime: Date | undefined;
     if (updateTimeDto.timeType === 'estimated_delivery_time') {
       previousTime = delivery.estimated_delivery_time || undefined;
@@ -714,29 +669,31 @@ export class DeliveriesService {
     }
 
     try {
-      // Update the delivery time
+      const newTimeDate = new Date(updateTimeDto.newTime);
+
       const updatedDelivery = await this.prisma.delivery.update({
         where: { id },
         data: {
-          [updateTimeDto.timeType]: updateTimeDto.newTime,
+          [updateTimeDto.timeType]: newTimeDate,
         },
       });
 
-      // Create time update record
       await this.prisma.timeUpdate.create({
         data: {
           order_id: delivery.order_id,
           previous_time: previousTime,
-          new_time: updateTimeDto.newTime,
+          new_time: newTimeDate,
           reason: updateTimeDto.reason,
           updated_by: updateTimeDto.employeeId,
           notified_customer: updateTimeDto.notifyCustomer || false,
         },
       });
 
-      // Notify customer if requested
-      if (updateTimeDto.timeType === 'estimated_delivery_time') {
-        const deliveryTimeStr = updateTimeDto.newTime.toLocaleTimeString([], {
+      if (
+        updateTimeDto.notifyCustomer &&
+        updateTimeDto.timeType === 'estimated_delivery_time'
+      ) {
+        const deliveryTimeStr = newTimeDate.toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
         });
@@ -747,9 +704,9 @@ export class DeliveriesService {
 
         await this.createDeliveryNotification(
           delivery.order_id,
-          status as DeliveryStatus,
-          estimatedTime,
-          notes,
+          delivery.status as DeliveryStatus,
+          newTimeDate,
+          message,
         );
       }
 
@@ -763,20 +720,18 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Updates the location of a delivery
-   */
   async updateLocation(id: number, updateLocationDto: UpdateLocationDto) {
     const delivery = await this.findOne(id);
 
-    if (delivery.status !== DeliveryStatus.OUT_FOR_DELIVERY) {
+    if (
+      (delivery.status as DeliveryStatus) !== DeliveryStatus.OUT_FOR_DELIVERY
+    ) {
       throw new BadRequestException(
         'Location can only be updated for deliveries that are out for delivery',
       );
     }
 
     try {
-      // Parse and update location history
       const locationHistory = this.parseLocationHistory(delivery);
 
       if (delivery.last_latitude && delivery.last_longitude) {
@@ -817,7 +772,6 @@ export class DeliveriesService {
         },
       });
 
-      // Notify customer about location update if requested
       if (updateLocationDto.notifyCustomer && updatedDelivery.order?.user?.id) {
         await this.notifyLocationUpdate(updatedDelivery);
       }
@@ -837,16 +791,17 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Parses location history from JSON to array
-   */
-  private parseLocationHistory(delivery: any): LocationHistoryEntry[] {
+  private parseLocationHistory(
+    delivery: DeliveryWithRelations,
+  ): LocationHistoryEntry[] {
     if (!delivery.location_history) {
       return [];
     }
 
     try {
-      return JSON.parse(delivery.location_history as string);
+      return JSON.parse(
+        delivery.location_history as string,
+      ) as LocationHistoryEntry[];
     } catch {
       this.logger.warn(
         `Failed to parse location history for delivery ${delivery.id}`,
@@ -855,10 +810,9 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Notifies the customer about location updates
-   */
-  private async notifyLocationUpdate(delivery: any): Promise<void> {
+  private async notifyLocationUpdate(
+    delivery: DeliveryWithRelations,
+  ): Promise<void> {
     try {
       const employeeName = delivery.employee
         ? `${delivery.employee.first_name || ''} ${delivery.employee.last_name || ''}`.trim()
@@ -867,7 +821,7 @@ export class DeliveriesService {
       const message = `${employeeName} has updated their location for your order #${delivery.order.order_id}. You can track the delivery on the map.`;
 
       await this.notificationsService.create({
-        user_id: delivery.order.user.id,
+        user_id: delivery.order.user?.id || 0,
         order_id: delivery.order_id,
         message,
         type: 'location_update',
@@ -882,9 +836,6 @@ export class DeliveriesService {
     }
   }
 
-  /**
-   * Gets the current location of a delivery
-   */
   async getLocation(id: number) {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
@@ -953,9 +904,6 @@ export class DeliveriesService {
     };
   }
 
-  /**
-   * Gets the location history of a delivery
-   */
   async getLocationHistory(id: number) {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
@@ -974,10 +922,10 @@ export class DeliveriesService {
       throw new NotFoundException(`Delivery with ID ${id} not found`);
     }
 
-    // Parse location history from JSON
-    let locationHistory = this.parseLocationHistory(delivery);
+    const locationHistory = this.parseLocationHistory(
+      delivery as DeliveryWithRelations,
+    );
 
-    // Add current location to history if available
     if (delivery.last_latitude && delivery.last_longitude) {
       locationHistory.push({
         latitude: delivery.last_latitude,
@@ -995,11 +943,7 @@ export class DeliveriesService {
     };
   }
 
-  /**
-   * Removes a delivery
-   */
   async remove(id: number) {
-    // Verify delivery exists
     await this.findOne(id);
 
     try {

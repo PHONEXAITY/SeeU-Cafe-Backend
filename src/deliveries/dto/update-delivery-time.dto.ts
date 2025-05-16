@@ -8,6 +8,7 @@ import {
   IsString,
   IsBoolean,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateDeliveryTimeDto {
   @ApiProperty({
@@ -17,7 +18,7 @@ export class UpdateDeliveryTimeDto {
   })
   @IsNotEmpty()
   @IsEnum(['estimated_delivery_time', 'pickup_from_kitchen_time'])
-  timeType: string;
+  timeType: 'estimated_delivery_time' | 'pickup_from_kitchen_time';
 
   @ApiProperty({
     description: 'New time value (ISO 8601 format)',
@@ -25,7 +26,7 @@ export class UpdateDeliveryTimeDto {
   })
   @IsNotEmpty()
   @IsDateString()
-  newTime: string;
+  newTime: string; // Keep as string for validation, convert to Date in service
 
   @ApiProperty({
     description: 'Reason for time update',
@@ -43,6 +44,7 @@ export class UpdateDeliveryTimeDto {
   })
   @IsOptional()
   @IsInt()
+  @Type(() => Number)
   employeeId?: number;
 
   @ApiProperty({
