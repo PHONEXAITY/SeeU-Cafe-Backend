@@ -100,7 +100,7 @@ export class DeliveriesController {
   @ApiResponse({ status: 200, description: 'Delivery details' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Delivery not found' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id') id: string): Promise<any> {
     return this.deliveriesService.findOne(+id);
   }
 
