@@ -1,9 +1,11 @@
+// src/deliveries/deliveries.service.ts
 import {
   Injectable,
   NotFoundException,
   ConflictException,
   BadRequestException,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerNotificationsService } from '../customer-notifications/customer-notifications.service';
@@ -11,36 +13,22 @@ import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
-import { DeliveryStatus } from './enums/delivery-status.enum';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { QueryDeliveryDto } from './dto/query-delivery.dto';
+import { DeliveryStatus } from './enums/delivery-status.enum';
 import { Prisma, Delivery } from '@prisma/client';
-import { LocationHistoryEntry } from './interface/types';
-
-interface DeliveryWithRelations extends Delivery {
-  order: {
-    id: number;
-    order_id: string;
-    User_id: number | null;
-    create_at: Date;
-    total_price: number;
-    user?: {
-      id: number;
-      email: string;
-      first_name?: string | null;
-      last_name?: string | null;
-    } | null;
-  };
-  employee?: {
-    id: number;
-    first_name: string;
-    last_name: string;
-    phone?: string | null;
-  } | null;
-}
+import {
+  LocationHistoryEntry,
+  DeliveryWithDetails,
+  DeliveryLocationInfo,
+  DeliveryNotificationPayload,
+} from './interface/types';
 
 @Injectable()
 export class DeliveriesService {
   private readonly logger = new Logger(DeliveriesService.name);
+
+  // Define valid status transitions based on business logic
   private readonly validStatusTransitions: Record<
     DeliveryStatus,
     DeliveryStatus[]
@@ -57,8 +45,8 @@ export class DeliveriesService {
       DeliveryStatus.DELIVERED,
       DeliveryStatus.CANCELLED,
     ],
-    [DeliveryStatus.DELIVERED]: [],
-    [DeliveryStatus.CANCELLED]: [],
+    [DeliveryStatus.DELIVERED]: [], // No transitions allowed from delivered
+    [DeliveryStatus.CANCELLED]: [], // No transitions allowed from cancelled
   };
 
   constructor(
@@ -66,115 +54,37 @@ export class DeliveriesService {
     private readonly notificationsService: CustomerNotificationsService,
   ) {}
 
-  private async createDeliveryNotification(
-    orderId: number,
-    status: DeliveryStatus,
-    estimatedTime?: Date,
-    customMessage?: string,
-  ): Promise<void> {
-    try {
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        select: {
-          User_id: true,
-          order_id: true,
-        },
-      });
+  /**
+   * Create a new delivery
+   */
+  async create(createDeliveryDto: CreateDeliveryDto): Promise<Delivery> {
+    this.logger.log(
+      `Creating delivery for order ${createDeliveryDto.order_id}`,
+    );
 
-      if (!order?.User_id) {
-        return;
-      }
+    // Validate order exists and is eligible for delivery
+    await this.validateOrderForDelivery(createDeliveryDto.order_id);
 
-      let message = customMessage;
-      if (!message) {
-        message = this.generateStatusNotificationMessage(
-          order.order_id,
-          status,
-          estimatedTime,
-        );
-      }
-
-      await this.notificationsService.create({
-        user_id: order.User_id,
-        order_id: orderId,
-        message,
-        type: 'delivery_update',
-        action_url: '/delivery',
-        read: false,
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to create delivery notification for order ${orderId}:`,
-        error,
-      );
-    }
-  }
-
-  private generateStatusNotificationMessage(
-    orderNumber: string,
-    status: DeliveryStatus,
-    estimatedTime?: Date,
-  ): string {
-    switch (status) {
-      case DeliveryStatus.PENDING:
-        return `Your delivery order #${orderNumber} is being processed. We'll notify you when it's ready for delivery.`;
-      case DeliveryStatus.PREPARING:
-        return `Your order #${orderNumber} is being prepared. It will be ready for delivery soon.`;
-      case DeliveryStatus.OUT_FOR_DELIVERY: {
-        const eta = estimatedTime
-          ? `and should arrive by ${estimatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-          : '';
-        return `Your order #${orderNumber} is on the way ${eta}.`;
-      }
-      case DeliveryStatus.DELIVERED:
-        return `Your order #${orderNumber} has been delivered. Enjoy your meal!`;
-      case DeliveryStatus.CANCELLED:
-        return `Your delivery for order #${orderNumber} has been cancelled. Contact customer service for more information.`;
-      default:
-        return `Your delivery for order #${orderNumber} has been updated to status: ${String(status)}`;
-    }
-  }
-
-  async create(createDeliveryDto: CreateDeliveryDto) {
-    const { order_id, employee_id } = createDeliveryDto;
-
-    const order = await this.prisma.order.findUnique({
-      where: { id: order_id },
-    });
-
-    if (!order) {
-      throw new NotFoundException(`Order with ID ${order_id} not found`);
+    // Validate employee if provided
+    if (createDeliveryDto.employee_id) {
+      await this.validateEmployee(createDeliveryDto.employee_id);
     }
 
-    if (order.order_type !== 'delivery') {
-      throw new BadRequestException(
-        `Order with ID ${order_id} is not a delivery order. Order type: ${order.order_type}`,
-      );
-    }
-
+    // Check if delivery already exists for this order
     const existingDelivery = await this.prisma.delivery.findUnique({
-      where: { order_id },
+      where: { order_id: createDeliveryDto.order_id },
     });
 
     if (existingDelivery) {
       throw new ConflictException(
-        `Delivery for order with ID ${order_id} already exists`,
+        `Delivery for order ${createDeliveryDto.order_id} already exists`,
       );
     }
 
-    if (employee_id) {
-      const employee = await this.prisma.employee.findUnique({
-        where: { id: employee_id },
-      });
-
-      if (!employee) {
-        throw new NotFoundException(
-          `Employee with ID ${employee_id} not found`,
-        );
-      }
-    }
-
+    // Generate unique delivery ID
     const deliveryId = BigInt(Date.now());
+
+    // Set default estimated delivery time if not provided (1 hour from now)
     const estimatedDeliveryTime = createDeliveryDto.estimated_delivery_time
       ? new Date(createDeliveryDto.estimated_delivery_time)
       : new Date(Date.now() + 60 * 60 * 1000);
@@ -190,59 +100,81 @@ export class DeliveriesService {
           status,
         },
         include: {
-          order: true,
-          employee: true,
+          order: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+          employee: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              phone: true,
+            },
+          },
         },
       });
 
+      // Update order status to reflect delivery creation
       if (status === DeliveryStatus.OUT_FOR_DELIVERY) {
-        await this.updateOrderStatus(order.id, status, employee_id);
+        await this.updateOrderStatus(
+          createDeliveryDto.order_id,
+          'out_for_delivery',
+          createDeliveryDto.employee_id,
+          'Order assigned for delivery',
+        );
       }
 
+      // Send notification to customer
       await this.createDeliveryNotification(
-        order.id,
+        createDeliveryDto.order_id,
         status,
         estimatedDeliveryTime,
+      );
+
+      this.logger.log(
+        `Successfully created delivery ${delivery.id} for order ${createDeliveryDto.order_id}`,
       );
 
       return {
         ...delivery,
         delivery_id: delivery.delivery_id.toString(),
-      };
+      } as Delivery;
     } catch (error) {
       this.logger.error(
-        `Failed to create delivery for order ${order_id}:`,
+        `Failed to create delivery for order ${createDeliveryDto.order_id}:`,
         error,
       );
       throw new BadRequestException(
-        `Failed to create delivery for order ${order_id}`,
+        `Failed to create delivery: ${error.message}`,
       );
     }
   }
 
-  private async updateOrderStatus(
-    orderId: number,
-    status: DeliveryStatus,
-    employeeId?: number,
-    notes?: string,
-  ): Promise<void> {
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status },
-    });
+  /**
+   * Find all deliveries with filtering and pagination
+   */
+  async findAll(queryDto: QueryDeliveryDto = {}) {
+    const {
+      status,
+      employeeId,
+      search,
+      from_date,
+      to_date,
+      page = 1,
+      limit = 10,
+    } = queryDto;
 
-    await this.prisma.orderTimeline.create({
-      data: {
-        order_id: orderId,
-        status,
-        employee_id: employeeId,
-        notes: notes || `Status updated to ${status}`,
-        timestamp: new Date(),
-      },
-    });
-  }
-
-  async findAll(status?: DeliveryStatus, employeeId?: number) {
+    // Build where clause
     const where: Prisma.DeliveryWhereInput = {};
 
     if (status) {
@@ -253,7 +185,41 @@ export class DeliveriesService {
       where.employee_id = employeeId;
     }
 
+    if (search) {
+      where.OR = [
+        { delivery_address: { contains: search, mode: 'insensitive' } },
+        { phone_number: { contains: search, mode: 'insensitive' } },
+        { customer_note: { contains: search, mode: 'insensitive' } },
+        { order: { order_id: { contains: search, mode: 'insensitive' } } },
+        {
+          order: {
+            user: {
+              OR: [
+                { first_name: { contains: search, mode: 'insensitive' } },
+                { last_name: { contains: search, mode: 'insensitive' } },
+                { email: { contains: search, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
+      ];
+    }
+
+    if (from_date || to_date) {
+      where.created_at = {};
+      if (from_date) {
+        where.created_at.gte = new Date(from_date);
+      }
+      if (to_date) {
+        where.created_at.lte = new Date(to_date);
+      }
+    }
+
     try {
+      // Get total count for pagination
+      const totalCount = await this.prisma.delivery.count({ where });
+
+      // Get paginated results
       const deliveries = await this.prisma.delivery.findMany({
         where,
         include: {
@@ -265,6 +231,7 @@ export class DeliveriesService {
                   email: true,
                   first_name: true,
                   last_name: true,
+                  phone: true,
                 },
               },
             },
@@ -274,25 +241,45 @@ export class DeliveriesService {
               id: true,
               first_name: true,
               last_name: true,
+              phone: true,
             },
           },
         },
-        orderBy: {
-          actual_delivery_time: 'desc',
-        },
+        orderBy: [
+          { status: 'asc' }, // Active deliveries first
+          { created_at: 'desc' },
+        ],
+        skip: (page - 1) * limit,
+        take: limit,
       });
 
-      return deliveries.map((delivery) => ({
+      // Convert BigInt to string for JSON serialization
+      const serializedDeliveries = deliveries.map((delivery) => ({
         ...delivery,
         delivery_id: delivery.delivery_id.toString(),
       }));
+
+      return {
+        data: serializedDeliveries,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit),
+          hasNextPage: page * limit < totalCount,
+          hasPreviousPage: page > 1,
+        },
+      };
     } catch (error) {
       this.logger.error('Failed to fetch deliveries:', error);
       throw new BadRequestException('Failed to fetch deliveries');
     }
   }
 
-  async findOne(id: number): Promise<DeliveryWithRelations> {
+  /**
+   * Find a single delivery by ID
+   */
+  async findOne(id: number): Promise<DeliveryWithDetails> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
       include: {
@@ -304,12 +291,23 @@ export class DeliveriesService {
                 email: true,
                 first_name: true,
                 last_name: true,
+                phone: true,
               },
             },
             order_details: {
               include: {
-                food_menu: true,
-                beverage_menu: true,
+                food_menu: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+                beverage_menu: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
             timeline: {
@@ -325,6 +323,7 @@ export class DeliveriesService {
             first_name: true,
             last_name: true,
             phone: true,
+            profile_photo: true,
           },
         },
       },
@@ -336,11 +335,14 @@ export class DeliveriesService {
 
     return {
       ...delivery,
-      delivery_id: delivery.delivery_id,
-    } as DeliveryWithRelations;
+      delivery_id: delivery.delivery_id.toString(),
+    } as DeliveryWithDetails;
   }
 
-  async findByOrderId(orderId: number) {
+  /**
+   * Find delivery by order ID
+   */
+  async findByOrderId(orderId: number): Promise<DeliveryWithDetails> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { order_id: orderId },
       include: {
@@ -352,12 +354,23 @@ export class DeliveriesService {
                 email: true,
                 first_name: true,
                 last_name: true,
+                phone: true,
               },
             },
             order_details: {
               include: {
-                food_menu: true,
-                beverage_menu: true,
+                food_menu: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+                beverage_menu: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
             timeline: {
@@ -373,6 +386,7 @@ export class DeliveriesService {
             first_name: true,
             last_name: true,
             phone: true,
+            profile_photo: true,
           },
         },
       },
@@ -385,23 +399,28 @@ export class DeliveriesService {
     return {
       ...delivery,
       delivery_id: delivery.delivery_id.toString(),
-    };
+    } as DeliveryWithDetails;
   }
 
-  async update(id: number, updateDeliveryDto: UpdateDeliveryDto) {
+  /**
+   * Update delivery details
+   */
+  async update(
+    id: number,
+    updateDeliveryDto: UpdateDeliveryDto,
+  ): Promise<Delivery> {
     const existingDelivery = await this.findOne(id);
 
-    if (updateDeliveryDto.order_id) {
-      await this.validateOrderForDelivery(updateDeliveryDto.order_id, id);
-    }
-
+    // Validate employee if being updated
     if (updateDeliveryDto.employee_id) {
       await this.validateEmployee(updateDeliveryDto.employee_id);
     }
 
-    const data: Prisma.DeliveryUpdateInput = { ...updateDeliveryDto };
+    // Format the data for Prisma update
+    const updateData: Prisma.DeliveryUpdateInput = { ...updateDeliveryDto };
+
     if (updateDeliveryDto.estimated_delivery_time) {
-      data.estimated_delivery_time = new Date(
+      updateData.estimated_delivery_time = new Date(
         updateDeliveryDto.estimated_delivery_time,
       );
     }
@@ -409,258 +428,117 @@ export class DeliveriesService {
     try {
       const updatedDelivery = await this.prisma.delivery.update({
         where: { id },
-        data,
+        data: updateData,
         include: {
           order: true,
           employee: true,
         },
       });
 
-      const updatedStatus = updateDeliveryDto.status;
-      const currentStatus = existingDelivery.status as DeliveryStatus;
-
-      if (updatedStatus && updatedStatus !== currentStatus) {
+      // Handle status change if status was updated
+      if (
+        updateDeliveryDto.status &&
+        updateDeliveryDto.status !== existingDelivery.status
+      ) {
         await this.handleStatusChange(
           existingDelivery,
-          updatedStatus,
+          updateDeliveryDto.status,
           updateDeliveryDto.employee_id ??
             existingDelivery.employee_id ??
             undefined,
         );
       }
 
+      this.logger.log(`Successfully updated delivery ${id}`);
+
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      };
+      } as Delivery;
     } catch (error) {
       this.logger.error(`Failed to update delivery ${id}:`, error);
-      throw new BadRequestException(`Failed to update delivery ${id}`);
-    }
-  }
-
-  private async validateOrderForDelivery(
-    orderId: number,
-    deliveryId?: number,
-  ): Promise<void> {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-    });
-
-    if (!order) {
-      throw new NotFoundException(`Order with ID ${orderId} not found`);
-    }
-
-    if (order.order_type !== 'delivery') {
       throw new BadRequestException(
-        `Order with ID ${orderId} is not a delivery order. Order type: ${order.order_type}`,
-      );
-    }
-
-    const anotherDelivery = await this.prisma.delivery.findUnique({
-      where: { order_id: orderId },
-    });
-
-    if (anotherDelivery && (!deliveryId || anotherDelivery.id !== deliveryId)) {
-      throw new ConflictException(
-        `Delivery for order with ID ${orderId} already exists`,
+        `Failed to update delivery: ${error.message}`,
       );
     }
   }
 
-  private async validateEmployee(employeeId: number): Promise<void> {
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: employeeId },
-    });
+  /**
+   * Update delivery status with validation
+   */
+  async updateStatus(
+    id: number,
+    updateStatusDto: UpdateStatusDto,
+  ): Promise<Delivery> {
+    const delivery = await this.findOne(id);
+    const currentStatus = delivery.status as DeliveryStatus;
+    const newStatus = updateStatusDto.status;
 
-    if (!employee) {
-      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
-    }
-  }
-
-  private async handleStatusChange(
-    delivery: DeliveryWithRelations,
-    newStatus: DeliveryStatus,
-    employeeId?: number,
-    notes?: string,
-  ): Promise<void> {
-    const estimatedTime = delivery.estimated_delivery_time || undefined;
-
-    await this.createDeliveryNotification(
-      delivery.order_id,
-      newStatus,
-      estimatedTime,
-      notes,
-    );
-
-    await this.prisma.orderTimeline.create({
-      data: {
-        order_id: delivery.order_id,
-        status: newStatus,
-        employee_id: employeeId,
-        notes: notes || `Status updated to ${newStatus}`,
-        timestamp: new Date(),
-      },
-    });
-
-    if (
-      newStatus === DeliveryStatus.DELIVERED &&
-      (delivery.status as DeliveryStatus) !== DeliveryStatus.DELIVERED
-    ) {
-      await this.handleDeliveryCompletion(delivery, employeeId, notes);
+    // Validate status transition
+    if (!this.isValidStatusTransition(currentStatus, newStatus)) {
+      throw new BadRequestException(
+        `Invalid status transition from ${currentStatus} to ${newStatus}`,
+      );
     }
 
+    // Special validation for OUT_FOR_DELIVERY
     if (
       newStatus === DeliveryStatus.OUT_FOR_DELIVERY &&
-      (delivery.status as DeliveryStatus) !== DeliveryStatus.OUT_FOR_DELIVERY &&
-      !delivery.pickup_from_kitchen_time
+      !delivery.employee_id
     ) {
-      await this.handleOutForDelivery(delivery, employeeId, notes);
-    }
-  }
-
-  private async handleDeliveryCompletion(
-    delivery: DeliveryWithRelations,
-    employeeId?: number,
-    notes?: string,
-  ): Promise<void> {
-    const now = new Date();
-
-    await this.prisma.delivery.update({
-      where: { id: delivery.id },
-      data: { actual_delivery_time: now },
-    });
-
-    await this.prisma.order.update({
-      where: { id: delivery.order_id },
-      data: { status: DeliveryStatus.DELIVERED },
-    });
-
-    await this.prisma.orderTimeline.create({
-      data: {
-        order_id: delivery.order_id,
-        status: DeliveryStatus.DELIVERED,
-        employee_id: employeeId,
-        notes: notes || 'Order delivered to customer',
-        timestamp: now,
-      },
-    });
-
-    if (delivery.order?.User_id) {
-      await this.createOrderHistory(delivery);
-    }
-  }
-
-  private async createOrderHistory(
-    delivery: DeliveryWithRelations,
-  ): Promise<void> {
-    try {
-      const orderData = delivery.order;
-      const orderDetails = await this.prisma.orderDetail.findMany({
-        where: { order_id: delivery.order_id },
-        include: { food_menu: true, beverage_menu: true },
-      });
-
-      const items = orderDetails.map((detail) => ({
-        name:
-          detail.food_menu?.name ||
-          detail.beverage_menu?.name ||
-          'Unknown Item',
-        quantity: detail.quantity,
-        price: detail.price,
-        notes: detail.notes,
-      }));
-
-      await this.prisma.orderHistory.create({
-        data: {
-          user_id: orderData.User_id || 0,
-          order_id: orderData.order_id,
-          order_date: orderData.create_at,
-          total_amount: orderData.total_price,
-          order_type: 'delivery',
-          status: DeliveryStatus.DELIVERED,
-          items,
-          delivery_address: delivery.delivery_address,
-        },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to create order history for order ${delivery.order_id}:`,
-        error,
+      throw new BadRequestException(
+        'Employee must be assigned before setting status to OUT_FOR_DELIVERY',
       );
     }
-  }
 
-  private async handleOutForDelivery(
-    delivery: DeliveryWithRelations,
-    employeeId?: number,
-    notes?: string,
-  ): Promise<void> {
-    await this.prisma.delivery.update({
-      where: { id: delivery.id },
-      data: { pickup_from_kitchen_time: new Date() },
-    });
-
-    await this.prisma.orderTimeline.create({
-      data: {
-        order_id: delivery.order_id,
-        status: DeliveryStatus.OUT_FOR_DELIVERY,
-        employee_id: employeeId,
-        notes: notes || 'Order picked up from kitchen for delivery',
-        timestamp: new Date(),
-      },
-    });
-  }
-
-  async updateStatus(id: number, updateStatusDto: UpdateStatusDto) {
     try {
-      const { status, notes } = updateStatusDto;
-      const delivery = await this.findOne(id);
-
-      const currentStatus = delivery.status as DeliveryStatus;
-
-      if (!this.validStatusTransitions[currentStatus].includes(status)) {
-        throw new BadRequestException(
-          `Cannot transition from ${currentStatus} to ${status}`,
-        );
-      }
-
-      if (status === DeliveryStatus.OUT_FOR_DELIVERY && !delivery.employee_id) {
-        throw new BadRequestException(
-          'Employee ID is required for out_for_delivery status',
-        );
-      }
-
       const updatedDelivery = await this.prisma.delivery.update({
         where: { id },
-        data: { status, notes },
+        data: {
+          status: newStatus,
+          notes: updateStatusDto.notes,
+        },
+        include: {
+          order: true,
+          employee: true,
+        },
       });
 
-      if (status !== currentStatus) {
-        const employeeId = delivery.employee_id ?? undefined;
-        await this.handleStatusChange(delivery, status, employeeId, notes);
-      }
+      // Handle status-specific actions
+      await this.handleStatusChange(
+        delivery,
+        newStatus,
+        delivery.employee_id ?? undefined,
+        updateStatusDto.notes,
+      );
+
+      this.logger.log(
+        `Successfully updated delivery ${id} status to ${newStatus}`,
+      );
 
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      };
+      } as Delivery;
     } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
       this.logger.error(`Failed to update status for delivery ${id}:`, error);
-      throw new BadRequestException('Failed to update delivery status');
+      throw new BadRequestException(
+        `Failed to update delivery status: ${error.message}`,
+      );
     }
   }
 
-  async updateTime(id: number, updateTimeDto: UpdateDeliveryTimeDto) {
+  /**
+   * Update delivery time
+   */
+  async updateTime(
+    id: number,
+    updateTimeDto: UpdateDeliveryTimeDto,
+  ): Promise<Delivery> {
     const delivery = await this.findOne(id);
     const orderData = delivery.order;
 
+    // Get previous time for tracking
     let previousTime: Date | undefined;
     if (updateTimeDto.timeType === 'estimated_delivery_time') {
       previousTime = delivery.estimated_delivery_time || undefined;
@@ -671,13 +549,23 @@ export class DeliveriesService {
     try {
       const newTimeDate = new Date(updateTimeDto.newTime);
 
+      // Validate that the new time is in the future
+      if (newTimeDate <= new Date()) {
+        throw new BadRequestException('Delivery time must be in the future');
+      }
+
       const updatedDelivery = await this.prisma.delivery.update({
         where: { id },
         data: {
           [updateTimeDto.timeType]: newTimeDate,
         },
+        include: {
+          order: true,
+          employee: true,
+        },
       });
 
+      // Create time update record
       await this.prisma.timeUpdate.create({
         data: {
           order_id: delivery.order_id,
@@ -689,11 +577,12 @@ export class DeliveriesService {
         },
       });
 
+      // Send notification to customer if requested
       if (
         updateTimeDto.notifyCustomer &&
         updateTimeDto.timeType === 'estimated_delivery_time'
       ) {
-        const deliveryTimeStr = newTimeDate.toLocaleTimeString([], {
+        const deliveryTimeStr = newTimeDate.toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
         });
@@ -710,35 +599,48 @@ export class DeliveriesService {
         );
       }
 
+      this.logger.log(
+        `Successfully updated ${updateTimeDto.timeType} for delivery ${id}`,
+      );
+
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      };
+      } as Delivery;
     } catch (error) {
       this.logger.error(`Failed to update time for delivery ${id}:`, error);
-      throw new BadRequestException(`Failed to update delivery time`);
+      throw new BadRequestException(
+        `Failed to update delivery time: ${error.message}`,
+      );
     }
   }
 
-  async updateLocation(id: number, updateLocationDto: UpdateLocationDto) {
+  /**
+   * Update delivery location
+   */
+  async updateLocation(
+    id: number,
+    updateLocationDto: UpdateLocationDto,
+  ): Promise<DeliveryLocationInfo> {
     const delivery = await this.findOne(id);
 
-    if (
-      (delivery.status as DeliveryStatus) !== DeliveryStatus.OUT_FOR_DELIVERY
-    ) {
+    // Only allow location updates for active deliveries
+    if (delivery.status !== DeliveryStatus.OUT_FOR_DELIVERY) {
       throw new BadRequestException(
-        'Location can only be updated for deliveries that are out for delivery',
+        'Location can only be updated for deliveries with status OUT_FOR_DELIVERY',
       );
     }
 
     try {
+      // Parse existing location history
       const locationHistory = this.parseLocationHistory(delivery);
 
+      // Add current location to history if it exists
       if (delivery.last_latitude && delivery.last_longitude) {
         locationHistory.push({
           latitude: delivery.last_latitude,
           longitude: delivery.last_longitude,
-          timestamp: delivery.last_location_update,
+          timestamp: delivery.last_location_update || new Date(),
           note: updateLocationDto.locationNote || '',
         });
       }
@@ -750,10 +652,7 @@ export class DeliveriesService {
           last_latitude: updateLocationDto.latitude,
           last_longitude: updateLocationDto.longitude,
           last_location_update: now,
-          location_history:
-            locationHistory.length > 0
-              ? JSON.stringify(locationHistory)
-              : undefined,
+          location_history: JSON.stringify(locationHistory),
         },
         include: {
           order: {
@@ -761,82 +660,57 @@ export class DeliveriesService {
               user: {
                 select: {
                   id: true,
-                  email: true,
                   first_name: true,
                   last_name: true,
                 },
               },
             },
           },
-          employee: true,
+          employee: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              phone: true,
+            },
+          },
         },
       });
 
+      // Send notification to customer if requested
       if (updateLocationDto.notifyCustomer && updatedDelivery.order?.user?.id) {
         await this.notifyLocationUpdate(updatedDelivery);
       }
 
+      this.logger.log(`Successfully updated location for delivery ${id}`);
+
       return {
-        ...updatedDelivery,
-        delivery_id: updatedDelivery.delivery_id.toString(),
-        location: {
-          latitude: updatedDelivery.last_latitude,
-          longitude: updatedDelivery.last_longitude,
-          lastUpdate: updatedDelivery.last_location_update,
+        id: updatedDelivery.id,
+        order_id: updatedDelivery.order_id,
+        latitude: updatedDelivery.last_latitude,
+        longitude: updatedDelivery.last_longitude,
+        lastUpdate: updatedDelivery.last_location_update,
+        status: updatedDelivery.status,
+        delivery_address: updatedDelivery.delivery_address,
+        employee: updatedDelivery.employee,
+        order: {
+          order_id: updatedDelivery.order.order_id,
+          User_id: updatedDelivery.order.User_id,
+          user: updatedDelivery.order.user,
         },
       };
     } catch (error) {
       this.logger.error(`Failed to update location for delivery ${id}:`, error);
-      throw new BadRequestException('Failed to update delivery location');
-    }
-  }
-
-  private parseLocationHistory(
-    delivery: DeliveryWithRelations,
-  ): LocationHistoryEntry[] {
-    if (!delivery.location_history) {
-      return [];
-    }
-
-    try {
-      return JSON.parse(
-        delivery.location_history as string,
-      ) as LocationHistoryEntry[];
-    } catch {
-      this.logger.warn(
-        `Failed to parse location history for delivery ${delivery.id}`,
-      );
-      return [];
-    }
-  }
-
-  private async notifyLocationUpdate(
-    delivery: DeliveryWithRelations,
-  ): Promise<void> {
-    try {
-      const employeeName = delivery.employee
-        ? `${delivery.employee.first_name || ''} ${delivery.employee.last_name || ''}`.trim()
-        : 'The delivery person';
-
-      const message = `${employeeName} has updated their location for your order #${delivery.order.order_id}. You can track the delivery on the map.`;
-
-      await this.notificationsService.create({
-        user_id: delivery.order.user?.id || 0,
-        order_id: delivery.order_id,
-        message,
-        type: 'location_update',
-        action_url: `/delivery/${delivery.id}/track`,
-        read: false,
-      });
-    } catch (error) {
-      this.logger.error(
-        `Failed to send location notification for delivery ${delivery.id}:`,
-        error,
+      throw new BadRequestException(
+        `Failed to update delivery location: ${error.message}`,
       );
     }
   }
 
-  async getLocation(id: number) {
+  /**
+   * Get delivery location information
+   */
+  async getLocation(id: number): Promise<DeliveryLocationInfo> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
       select: {
@@ -847,7 +721,6 @@ export class DeliveriesService {
         last_location_update: true,
         status: true,
         delivery_address: true,
-        employee_id: true,
         employee: {
           select: {
             id: true,
@@ -876,27 +749,12 @@ export class DeliveriesService {
       throw new NotFoundException(`Delivery with ID ${id} not found`);
     }
 
-    if (!delivery.last_latitude || !delivery.last_longitude) {
-      return {
-        id: delivery.id,
-        order_id: delivery.order_id,
-        location: null,
-        message: 'No location data available for this delivery yet.',
-        status: delivery.status,
-        delivery_address: delivery.delivery_address,
-        employee: delivery.employee,
-        order: delivery.order,
-      };
-    }
-
     return {
       id: delivery.id,
       order_id: delivery.order_id,
-      location: {
-        latitude: delivery.last_latitude,
-        longitude: delivery.last_longitude,
-        lastUpdate: delivery.last_location_update,
-      },
+      latitude: delivery.last_latitude,
+      longitude: delivery.last_longitude,
+      lastUpdate: delivery.last_location_update,
       status: delivery.status,
       delivery_address: delivery.delivery_address,
       employee: delivery.employee,
@@ -904,6 +762,9 @@ export class DeliveriesService {
     };
   }
 
+  /**
+   * Get delivery location history
+   */
   async getLocationHistory(id: number) {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
@@ -922,15 +783,14 @@ export class DeliveriesService {
       throw new NotFoundException(`Delivery with ID ${id} not found`);
     }
 
-    const locationHistory = this.parseLocationHistory(
-      delivery as DeliveryWithRelations,
-    );
+    const locationHistory = this.parseLocationHistory(delivery);
 
+    // Add current location as the most recent entry
     if (delivery.last_latitude && delivery.last_longitude) {
       locationHistory.push({
         latitude: delivery.last_latitude,
         longitude: delivery.last_longitude,
-        timestamp: delivery.last_location_update,
+        timestamp: delivery.last_location_update || new Date(),
         current: true,
       });
     }
@@ -943,17 +803,355 @@ export class DeliveriesService {
     };
   }
 
-  async remove(id: number) {
-    await this.findOne(id);
+  /**
+   * Delete a delivery
+   */
+  async remove(id: number): Promise<{ message: string }> {
+    const delivery = await this.findOne(id);
+
+    // Only allow deletion if delivery hasn't been completed
+    if (delivery.status === DeliveryStatus.DELIVERED) {
+      throw new ForbiddenException('Cannot delete a completed delivery');
+    }
 
     try {
       await this.prisma.delivery.delete({
         where: { id },
       });
+
+      this.logger.log(`Successfully deleted delivery ${id}`);
       return { message: 'Delivery deleted successfully' };
     } catch (error) {
       this.logger.error(`Failed to delete delivery ${id}:`, error);
-      throw new BadRequestException(`Failed to delete delivery ${id}`);
+      throw new BadRequestException(
+        `Failed to delete delivery: ${error.message}`,
+      );
+    }
+  }
+
+  // Private helper methods
+
+  private async validateOrderForDelivery(orderId: number): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+
+    if (order.order_type !== 'delivery') {
+      throw new BadRequestException(
+        `Order ${orderId} is not a delivery order (type: ${order.order_type})`,
+      );
+    }
+
+    if (!['confirmed', 'preparing'].includes(order.status)) {
+      throw new BadRequestException(
+        `Order ${orderId} is not in a valid state for delivery creation (status: ${order.status})`,
+      );
+    }
+  }
+
+  private async validateEmployee(employeeId: number): Promise<void> {
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+    });
+
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    if (employee.status !== 'active') {
+      throw new BadRequestException(`Employee ${employeeId} is not active`);
+    }
+  }
+
+  private isValidStatusTransition(
+    current: DeliveryStatus,
+    target: DeliveryStatus,
+  ): boolean {
+    if (current === target) return true;
+    return this.validStatusTransitions[current]?.includes(target) || false;
+  }
+
+  private async handleStatusChange(
+    delivery: DeliveryWithDetails,
+    newStatus: DeliveryStatus,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<void> {
+    const estimatedTime = delivery.estimated_delivery_time || undefined;
+
+    // Send notification to customer
+    await this.createDeliveryNotification(
+      delivery.order_id,
+      newStatus,
+      estimatedTime,
+      notes,
+    );
+
+    // Create order timeline entry
+    await this.prisma.orderTimeline.create({
+      data: {
+        order_id: delivery.order_id,
+        status: newStatus,
+        employee_id: employeeId,
+        notes: notes || `Delivery status updated to ${newStatus}`,
+        timestamp: new Date(),
+      },
+    });
+
+    // Handle specific status changes
+    switch (newStatus) {
+      case DeliveryStatus.OUT_FOR_DELIVERY:
+        await this.handleOutForDelivery(delivery, employeeId, notes);
+        break;
+      case DeliveryStatus.DELIVERED:
+        await this.handleDeliveryCompletion(delivery, employeeId, notes);
+        break;
+      case DeliveryStatus.CANCELLED:
+        await this.handleDeliveryCancellation(delivery, employeeId, notes);
+        break;
+    }
+  }
+
+  private async handleOutForDelivery(
+    delivery: DeliveryWithDetails,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<void> {
+    const now = new Date();
+
+    // Set pickup time if not already set
+    if (!delivery.pickup_from_kitchen_time) {
+      await this.prisma.delivery.update({
+        where: { id: delivery.id },
+        data: { pickup_from_kitchen_time: now },
+      });
+    }
+
+    // Update order status
+    await this.updateOrderStatus(
+      delivery.order_id,
+      'out_for_delivery',
+      employeeId,
+      notes || 'Order picked up from kitchen for delivery',
+    );
+  }
+
+  private async handleDeliveryCompletion(
+    delivery: DeliveryWithDetails,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<void> {
+    const now = new Date();
+
+    // Set actual delivery time
+    await this.prisma.delivery.update({
+      where: { id: delivery.id },
+      data: { actual_delivery_time: now },
+    });
+
+    // Update order status
+    await this.updateOrderStatus(
+      delivery.order_id,
+      'delivered',
+      employeeId,
+      notes || 'Order delivered to customer',
+    );
+
+    // Create order history for the customer
+    if (delivery.order?.User_id) {
+      await this.createOrderHistory(delivery);
+    }
+  }
+
+  private async handleDeliveryCancellation(
+    delivery: DeliveryWithDetails,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<void> {
+    // Update order status
+    await this.updateOrderStatus(
+      delivery.order_id,
+      'cancelled',
+      employeeId,
+      notes || 'Delivery cancelled',
+    );
+  }
+
+  private async updateOrderStatus(
+    orderId: number,
+    status: string,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<void> {
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status },
+    });
+
+    await this.prisma.orderTimeline.create({
+      data: {
+        order_id: orderId,
+        status,
+        employee_id: employeeId,
+        notes: notes || `Order status updated to ${status}`,
+        timestamp: new Date(),
+      },
+    });
+  }
+
+  private async createOrderHistory(
+    delivery: DeliveryWithDetails,
+  ): Promise<void> {
+    try {
+      const orderData = delivery.order;
+      const orderDetails = orderData.order_details || [];
+
+      const items = orderDetails.map((detail) => ({
+        name:
+          detail.food_menu?.name ||
+          detail.beverage_menu?.name ||
+          'Unknown Item',
+        quantity: detail.quantity,
+        price: detail.price,
+        notes: detail.notes,
+      }));
+
+      await this.prisma.orderHistory.create({
+        data: {
+          user_id: orderData.User_id || 0,
+          order_id: orderData.order_id,
+          order_date: orderData.create_at,
+          total_amount: orderData.total_price,
+          order_type: 'delivery',
+          status: 'delivered',
+          items,
+          delivery_address: delivery.delivery_address,
+        },
+      });
+
+      this.logger.log(`Created order history for order ${delivery.order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create order history for order ${delivery.order_id}:`,
+        error,
+      );
+    }
+  }
+
+  private async createDeliveryNotification(
+    orderId: number,
+    status: DeliveryStatus,
+    estimatedTime?: Date,
+    customMessage?: string,
+  ): Promise<void> {
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: {
+          User_id: true,
+          order_id: true,
+        },
+      });
+
+      if (!order?.User_id) {
+        this.logger.warn(
+          `No user found for order ${orderId}, skipping notification`,
+        );
+        return;
+      }
+
+      const message =
+        customMessage ||
+        this.generateStatusNotificationMessage(
+          order.order_id,
+          status,
+          estimatedTime,
+        );
+
+      const notificationPayload: DeliveryNotificationPayload = {
+        user_id: order.User_id,
+        order_id: orderId,
+        message,
+        type: 'delivery_update',
+        action_url: `/orders/${orderId}`,
+        read: false,
+      };
+
+      await this.notificationsService.create(notificationPayload);
+      this.logger.log(`Sent delivery notification for order ${orderId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create delivery notification for order ${orderId}:`,
+        error,
+      );
+    }
+  }
+
+  private generateStatusNotificationMessage(
+    orderNumber: string,
+    status: DeliveryStatus,
+    estimatedTime?: Date,
+  ): string {
+    const statusMessages = {
+      [DeliveryStatus.PENDING]: `Your delivery order #${orderNumber} is being processed. We'll notify you when it's ready for delivery.`,
+      [DeliveryStatus.PREPARING]: `Your order #${orderNumber} is being prepared. It will be ready for delivery soon.`,
+      [DeliveryStatus.OUT_FOR_DELIVERY]: `Your order #${orderNumber} is on the way${estimatedTime ? ` and should arrive by ${estimatedTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : ''}.`,
+      [DeliveryStatus.DELIVERED]: `Your order #${orderNumber} has been delivered. Enjoy your meal!`,
+      [DeliveryStatus.CANCELLED]: `Your delivery for order #${orderNumber} has been cancelled. Please contact customer service for more information.`,
+    };
+
+    return (
+      statusMessages[status] ||
+      `Your delivery for order #${orderNumber} has been updated to status: ${status}`
+    );
+  }
+
+  private async notifyLocationUpdate(delivery: any): Promise<void> {
+    try {
+      const employeeName = delivery.employee
+        ? `${delivery.employee.first_name || ''} ${delivery.employee.last_name || ''}`.trim()
+        : 'The delivery person';
+
+      const message = `${employeeName} has updated their location for your order #${delivery.order.order_id}. You can track the delivery on the map.`;
+
+      await this.notificationsService.create({
+        user_id: delivery.order.user?.id || 0,
+        order_id: delivery.order_id,
+        message,
+        type: 'location_update',
+        action_url: `/orders/${delivery.order_id}/track`,
+        read: false,
+      });
+
+      this.logger.log(
+        `Sent location update notification for delivery ${delivery.id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send location notification for delivery ${delivery.id}:`,
+        error,
+      );
+    }
+  }
+
+  private parseLocationHistory(delivery: any): LocationHistoryEntry[] {
+    if (!delivery.location_history) {
+      return [];
+    }
+
+    try {
+      const history = JSON.parse(delivery.location_history as string);
+      return Array.isArray(history) ? history : [];
+    } catch (error) {
+      this.logger.warn(
+        `Failed to parse location history for delivery ${delivery.id}:`,
+        error,
+      );
+      return [];
     }
   }
 }

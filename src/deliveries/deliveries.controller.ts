@@ -8,7 +8,11 @@ import {
   Delete,
   Query,
   UseGuards,
-  BadRequestException,
+  HttpCode,
+  HttpStatus,
+  ParseIntPipe,
+  ValidationPipe,
+  UsePipes,
 } from '@nestjs/common';
 import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
@@ -16,52 +20,128 @@ import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { QueryDeliveryDto } from './dto/query-delivery.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import {
   ApiTags,
   ApiOperation,
-  ApiResponse,
   ApiBearerAuth,
-  ApiQuery,
+  ApiParam,
   ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiBadRequestResponse,
+  ApiNotFoundResponse,
+  ApiUnauthorizedResponse,
+  ApiForbiddenResponse,
+  ApiConflictResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { DeliveryStatus } from './enums/delivery-status.enum';
-import { LocationHistoryEntry } from './interface/types';
 
-class LocationHistoryResponse {
+class DeliveryResponseDto {
   id: number;
   order_id: number;
   status: DeliveryStatus;
-  locationHistory: LocationHistoryEntry[];
+  delivery_id: string;
+  delivery_address: string;
+  phone_number?: string;
+  employee_id?: number;
+  delivery_fee?: number;
+  estimated_delivery_time?: Date;
+  actual_delivery_time?: Date;
+  pickup_from_kitchen_time?: Date;
+  customer_note?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+class DeliveryLocationResponseDto {
+  id: number;
+  order_id: number;
+  latitude: number;
+  longitude: number;
+  lastUpdate: Date;
+  status: string;
+  delivery_address: string;
+}
+
+class LocationHistoryResponseDto {
+  id: number;
+  order_id: number;
+  status: string;
+  locationHistory: Array<{
+    latitude: number;
+    longitude: number;
+    timestamp: Date;
+    note?: string;
+    current?: boolean;
+  }>;
+}
+
+class PaginatedDeliveryResponseDto {
+  data: DeliveryResponseDto[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
 }
 
 @ApiTags('Deliveries')
 @Controller('deliveries')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class DeliveriesController {
   constructor(private readonly deliveriesService: DeliveriesService) {}
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
-  @ApiOperation({ summary: 'Create a new delivery (Admin or Employee)' })
-  @ApiResponse({ status: 201, description: 'Delivery created successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Order or employee not found' })
-  @ApiResponse({
-    status: 409,
-    description: 'Delivery for order already exists',
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Create a new delivery',
+    description:
+      'Create a new delivery for an existing order. Only admins and employees can create deliveries.',
   })
-  create(@Body() createDeliveryDto: CreateDeliveryDto) {
-    return this.deliveriesService.create(createDeliveryDto);
+  @ApiCreatedResponse({
+    description: 'Delivery created successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid input data or business rule violation',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({ description: 'Insufficient permissions' })
+  @ApiNotFoundResponse({
+    description: 'Order not found or invalid for delivery',
+  })
+  @ApiConflictResponse({
+    description: 'Delivery already exists for this order',
+  })
+  @ApiBody({ type: CreateDeliveryDto })
+  async create(@Body() createDeliveryDto: CreateDeliveryDto) {
+    return await this.deliveriesService.create(createDeliveryDto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all deliveries' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get all deliveries',
+    description:
+      'Retrieve a paginated list of deliveries with optional filtering by status, employee, date range, and search terms.',
+  })
+  @ApiOkResponse({
+    description: 'List of deliveries retrieved successfully',
+    type: PaginatedDeliveryResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
   @ApiQuery({
     name: 'status',
     required: false,
@@ -74,163 +154,416 @@ export class DeliveriesController {
     type: Number,
     description: 'Filter by employee ID',
   })
-  @ApiResponse({ status: 200, description: 'List of deliveries' })
-  @ApiResponse({ status: 400, description: 'Invalid status' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  findAll(
-    @Query('status') status?: string,
-    @Query('employeeId') employeeId?: string,
-  ) {
-    if (
-      status &&
-      !Object.values(DeliveryStatus).includes(status as DeliveryStatus)
-    ) {
-      throw new BadRequestException(
-        `Status must be one of ${Object.values(DeliveryStatus).join(', ')}`,
-      );
-    }
-    return this.deliveriesService.findAll(
-      status as DeliveryStatus | undefined,
-      employeeId ? +employeeId : undefined,
-    );
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search in address, customer details, or order ID',
+  })
+  @ApiQuery({
+    name: 'from_date',
+    required: false,
+    type: String,
+    description: 'Filter from date (ISO 8601 format)',
+  })
+  @ApiQuery({
+    name: 'to_date',
+    required: false,
+    type: String,
+    description: 'Filter to date (ISO 8601 format)',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page (default: 10)',
+  })
+  async findAll(@Query() queryDto: QueryDeliveryDto) {
+    return await this.deliveriesService.findAll(queryDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a delivery by ID' })
-  @ApiResponse({ status: 200, description: 'Delivery details' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  findOne(@Param('id') id: string): Promise<any> {
-    return this.deliveriesService.findOne(+id);
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get delivery by ID',
+    description:
+      'Retrieve detailed information about a specific delivery including order details, customer info, and employee assignment.',
+  })
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery details retrieved successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return await this.deliveriesService.findOne(id);
   }
 
   @Get('order/:orderId')
-  @ApiOperation({ summary: 'Get a delivery by order ID' })
-  @ApiResponse({ status: 200, description: 'Delivery details' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  findByOrderId(@Param('orderId') orderId: string) {
-    return this.deliveriesService.findByOrderId(+orderId);
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get delivery by order ID',
+    description: 'Retrieve delivery information for a specific order.',
+  })
+  @ApiParam({ name: 'orderId', type: 'number', description: 'Order ID' })
+  @ApiOkResponse({
+    description: 'Delivery details retrieved successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({ description: 'Delivery not found for this order' })
+  async findByOrderId(@Param('orderId', ParseIntPipe) orderId: number) {
+    return await this.deliveriesService.findByOrderId(orderId);
   }
 
   @Get(':id/location')
-  @ApiOperation({ summary: 'Get the current location of a delivery' })
-  @ApiResponse({ status: 200, description: 'Delivery location details' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  getLocation(@Param('id') id: string) {
-    return this.deliveriesService.getLocation(+id);
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get delivery location',
+    description:
+      'Get the current location information for a delivery in progress.',
+  })
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery location retrieved successfully',
+    type: DeliveryLocationResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  async getLocation(@Param('id', ParseIntPipe) id: number) {
+    return await this.deliveriesService.getLocation(id);
   }
 
   @Get(':id/location-history')
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Get the location history of a delivery (Admin or Employee)',
+    summary: 'Get delivery location history',
+    description:
+      'Retrieve the complete location tracking history for a delivery. Admin and employee access only.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Delivery location history',
-    type: LocationHistoryResponse,
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery location history retrieved successfully',
+    type: LocationHistoryResponseDto,
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  getLocationHistory(@Param('id') id: string) {
-    return this.deliveriesService.getLocationHistory(+id);
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions - Admin/Employee only',
+  })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  async getLocationHistory(@Param('id', ParseIntPipe) id: number) {
+    return await this.deliveriesService.getLocationHistory(id);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
-  @ApiOperation({ summary: 'Update a delivery (Admin or Employee)' })
-  @ApiResponse({ status: 200, description: 'Delivery updated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({
-    status: 404,
-    description: 'Delivery, order, or employee not found',
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update delivery details',
+    description:
+      'Update delivery information such as address, phone number, employee assignment, etc. Admin and employee access only.',
   })
-  @ApiResponse({ status: 409, description: 'Conflict with existing delivery' })
-  update(
-    @Param('id') id: string,
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery updated successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input data' })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions - Admin/Employee only',
+  })
+  @ApiNotFoundResponse({
+    description: 'Delivery or associated resources not found',
+  })
+  @ApiBody({ type: UpdateDeliveryDto })
+  async update(
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateDeliveryDto: UpdateDeliveryDto,
   ) {
-    return this.deliveriesService.update(+id, updateDeliveryDto);
+    return await this.deliveriesService.update(id, updateDeliveryDto);
   }
 
   @Patch(':id/status')
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
-  @ApiOperation({ summary: 'Update delivery status (Admin or Employee)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Delivery status updated successfully',
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update delivery status',
+    description:
+      'Update the status of a delivery with optional notes. Status transitions are validated according to business rules.',
   })
-  @ApiResponse({ status: 400, description: 'Invalid status or payload' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery status updated successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid status transition or missing required data (e.g., employee for out_for_delivery)',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions - Admin/Employee only',
+  })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
   @ApiBody({
     type: UpdateStatusDto,
-    description: 'Status update payload',
     examples: {
-      example1: {
+      'Status Update': {
         value: {
           status: DeliveryStatus.PREPARING,
-          notes: 'Order is being prepared',
+          notes: 'Order is being prepared by the kitchen staff',
         },
       },
     },
   })
-  updateStatus(
-    @Param('id') id: string,
+  async updateStatus(
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateStatusDto: UpdateStatusDto,
   ) {
-    return this.deliveriesService.updateStatus(+id, updateStatusDto);
+    return await this.deliveriesService.updateStatus(id, updateStatusDto);
   }
 
   @Patch(':id/time')
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
-  @ApiOperation({ summary: 'Update delivery time (Admin or Employee)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Delivery time updated successfully',
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update delivery time',
+    description:
+      'Update estimated delivery time or pickup time with optional customer notification.',
   })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  updateTime(
-    @Param('id') id: string,
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery time updated successfully',
+    type: DeliveryResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid time data or time in the past',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions - Admin/Employee only',
+  })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  @ApiBody({ type: UpdateDeliveryTimeDto })
+  async updateTime(
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateTimeDto: UpdateDeliveryTimeDto,
   ) {
-    return this.deliveriesService.updateTime(+id, updateTimeDto);
+    return await this.deliveriesService.updateTime(id, updateTimeDto);
   }
 
   @Patch(':id/location')
   @UseGuards(RolesGuard)
   @Roles('admin', 'employee')
-  @ApiOperation({ summary: 'Update delivery location (Admin or Employee)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Delivery location updated successfully',
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update delivery location',
+    description:
+      'Update the current GPS location of a delivery in progress. Only allowed for deliveries with status OUT_FOR_DELIVERY.',
   })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  updateLocation(
-    @Param('id') id: string,
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery location updated successfully',
+    type: DeliveryLocationResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid coordinates or delivery not eligible for location updates',
+  })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions - Admin/Employee only',
+  })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  @ApiBody({ type: UpdateLocationDto })
+  async updateLocation(
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateLocationDto: UpdateLocationDto,
   ) {
-    return this.deliveriesService.updateLocation(+id, updateLocationDto);
+    return await this.deliveriesService.updateLocation(id, updateLocationDto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles('admin')
-  @ApiOperation({ summary: 'Delete a delivery (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Delivery deleted successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Delivery not found' })
-  remove(@Param('id') id: string) {
-    return this.deliveriesService.remove(+id);
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete delivery',
+    description:
+      "Delete a delivery record. Only admins can delete deliveries, and only if they haven't been completed.",
+  })
+  @ApiParam({ name: 'id', type: 'number', description: 'Delivery ID' })
+  @ApiOkResponse({
+    description: 'Delivery deleted successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Delivery deleted successfully' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Failed to delete delivery' })
+  @ApiUnauthorizedResponse({ description: 'Authentication required' })
+  @ApiForbiddenResponse({
+    description:
+      'Insufficient permissions - Admin only, or delivery cannot be deleted',
+  })
+  @ApiNotFoundResponse({ description: 'Delivery not found' })
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return await this.deliveriesService.remove(id);
+  }
+
+  @Get('status/active')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get active deliveries',
+    description:
+      'Retrieve all deliveries that are currently active (not delivered or cancelled).',
+  })
+  @ApiOkResponse({
+    description: 'Active deliveries retrieved successfully',
+    type: [DeliveryResponseDto],
+  })
+  async getActiveDeliveries() {
+    const queryDto = new QueryDeliveryDto();
+    queryDto.limit = 100;
+
+    const result = await this.deliveriesService.findAll(queryDto);
+
+    const activeStatuses = [
+      DeliveryStatus.PENDING,
+      DeliveryStatus.PREPARING,
+      DeliveryStatus.OUT_FOR_DELIVERY,
+    ];
+
+    const activeDeliveries = result.data.filter((delivery) =>
+      activeStatuses.includes(delivery.status as DeliveryStatus),
+    );
+
+    return {
+      data: activeDeliveries,
+      count: activeDeliveries.length,
+    };
+  }
+
+  @Get('employee/:employeeId/active')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'employee')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get active deliveries for employee',
+    description:
+      'Retrieve all active deliveries assigned to a specific employee.',
+  })
+  @ApiParam({ name: 'employeeId', type: 'number', description: 'Employee ID' })
+  @ApiOkResponse({
+    description: 'Employee active deliveries retrieved successfully',
+    type: [DeliveryResponseDto],
+  })
+  async getEmployeeActiveDeliveries(
+    @Param('employeeId', ParseIntPipe) employeeId: number,
+  ) {
+    const queryDto = new QueryDeliveryDto();
+    queryDto.employeeId = employeeId;
+    queryDto.limit = 50;
+
+    const result = await this.deliveriesService.findAll(queryDto);
+
+    const activeStatuses = [
+      DeliveryStatus.PENDING,
+      DeliveryStatus.PREPARING,
+      DeliveryStatus.OUT_FOR_DELIVERY,
+    ];
+
+    const activeDeliveries = result.data.filter((delivery) =>
+      activeStatuses.includes(delivery.status as DeliveryStatus),
+    );
+
+    return {
+      data: activeDeliveries,
+      count: activeDeliveries.length,
+    };
+  }
+
+  @Get('analytics/summary')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get delivery analytics summary',
+    description:
+      'Get summary statistics for deliveries including counts by status and performance metrics.',
+  })
+  @ApiOkResponse({
+    description: 'Delivery analytics retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        totalDeliveries: { type: 'number' },
+        statusBreakdown: {
+          type: 'object',
+          properties: {
+            pending: { type: 'number' },
+            preparing: { type: 'number' },
+            out_for_delivery: { type: 'number' },
+            delivered: { type: 'number' },
+            cancelled: { type: 'number' },
+          },
+        },
+        avgDeliveryTime: {
+          type: 'number',
+          description: 'Average delivery time in minutes',
+        },
+        onTimeDeliveryRate: {
+          type: 'number',
+          description: 'Percentage of on-time deliveries',
+        },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    type: Number,
+    description: 'Number of days to analyze (default: 30)',
+  })
+  async getDeliveryAnalytics(@Query('days') days: number = 30) {
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - days);
+
+    const queryDto = new QueryDeliveryDto();
+    queryDto.from_date = fromDate.toISOString();
+    queryDto.limit = 1000;
+
+    const result = await this.deliveriesService.findAll(queryDto);
+
+    const statusBreakdown = result.data.reduce(
+      (acc, delivery) => {
+        acc[delivery.status] = (acc[delivery.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    return {
+      totalDeliveries: result.pagination.totalCount,
+      statusBreakdown,
+      period: `Last ${days} days`,
+      avgDeliveryTime: null,
+      onTimeDeliveryRate: null,
+    };
   }
 }

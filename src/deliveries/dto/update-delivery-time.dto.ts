@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
   IsEnum,
@@ -7,18 +7,24 @@ import {
   IsOptional,
   IsString,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+
+enum TimeUpdateType {
+  ESTIMATED_DELIVERY_TIME = 'estimated_delivery_time',
+  PICKUP_FROM_KITCHEN_TIME = 'pickup_from_kitchen_time',
+}
 
 export class UpdateDeliveryTimeDto {
   @ApiProperty({
     description: 'Type of time to update',
-    enum: ['estimated_delivery_time', 'pickup_from_kitchen_time'],
-    example: 'estimated_delivery_time',
+    enum: TimeUpdateType,
+    example: TimeUpdateType.ESTIMATED_DELIVERY_TIME,
   })
   @IsNotEmpty()
-  @IsEnum(['estimated_delivery_time', 'pickup_from_kitchen_time'])
-  timeType: 'estimated_delivery_time' | 'pickup_from_kitchen_time';
+  @IsEnum(TimeUpdateType)
+  timeType: TimeUpdateType;
 
   @ApiProperty({
     description: 'New time value (ISO 8601 format)',
@@ -26,43 +32,45 @@ export class UpdateDeliveryTimeDto {
   })
   @IsNotEmpty()
   @IsDateString()
-  newTime: string; // Keep as string for validation, convert to Date in service
+  newTime: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Reason for time update',
-    example: 'Traffic delay',
-    required: false,
+    example: 'Traffic delay due to construction',
+    maxLength: 300,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(300)
+  @Transform(({ value }: { value: string }) => (value ? value.trim() : value))
   reason?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'ID of employee who updated the time',
     example: 1,
-    required: false,
   })
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   employeeId?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Whether to notify the customer about the time change',
     example: true,
-    required: false,
     default: false,
   })
   @IsOptional()
   @IsBoolean()
   notifyCustomer?: boolean;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Custom notification message to send to the customer',
-    example: 'Your delivery is delayed due to heavy traffic',
-    required: false,
+    example: 'Your delivery is slightly delayed due to heavy traffic',
+    maxLength: 200,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  @Transform(({ value }: { value: string }) => (value ? value.trim() : value))
   notificationMessage?: string;
 }
