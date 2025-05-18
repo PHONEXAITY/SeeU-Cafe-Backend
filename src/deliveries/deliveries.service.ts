@@ -15,7 +15,7 @@ import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { QueryDeliveryDto } from './dto/query-delivery.dto';
-import { DeliveryStatus } from './enums/delivery-status.enum';
+import { DeliveryStatus, DeliveryTimeType } from './enums/delivery-status.enum';
 import { Prisma, Delivery } from '@prisma/client';
 import {
   LocationHistoryEntry,
@@ -145,10 +145,11 @@ export class DeliveriesService {
         `Successfully created delivery ${delivery.id} for order ${createDeliveryDto.order_id}`,
       );
 
+      // Return delivery with converted delivery_id
       return {
         ...delivery,
         delivery_id: delivery.delivery_id.toString(),
-      } as Delivery;
+      } as unknown as Delivery;
     } catch (error) {
       this.logger.error(
         `Failed to create delivery for order ${createDeliveryDto.order_id}:`,
@@ -174,7 +175,7 @@ export class DeliveriesService {
       limit = 10,
     } = queryDto;
 
-    // Build where clause
+    // Build where clause with correct field names from Prisma schema
     const where: Prisma.DeliveryWhereInput = {};
 
     if (status) {
@@ -188,7 +189,6 @@ export class DeliveriesService {
     if (search) {
       where.OR = [
         { delivery_address: { contains: search, mode: 'insensitive' } },
-        { phone_number: { contains: search, mode: 'insensitive' } },
         { customer_note: { contains: search, mode: 'insensitive' } },
         { order: { order_id: { contains: search, mode: 'insensitive' } } },
         {
@@ -205,14 +205,14 @@ export class DeliveriesService {
       ];
     }
 
+    // Fix: Use created_at from order relation, not directly from delivery
     if (from_date || to_date) {
-      where.created_at = {};
-      if (from_date) {
-        where.created_at.gte = new Date(from_date);
-      }
-      if (to_date) {
-        where.created_at.lte = new Date(to_date);
-      }
+      where.order = {
+        create_at: {
+          ...(from_date && { gte: new Date(from_date) }),
+          ...(to_date && { lte: new Date(to_date) }),
+        },
+      };
     }
 
     try {
@@ -247,7 +247,7 @@ export class DeliveriesService {
         },
         orderBy: [
           { status: 'asc' }, // Active deliveries first
-          { created_at: 'desc' },
+          { order: { create_at: 'desc' } },
         ],
         skip: (page - 1) * limit,
         take: limit,
@@ -333,9 +333,13 @@ export class DeliveriesService {
       throw new NotFoundException(`Delivery with ID ${id} not found`);
     }
 
+    // Convert to DeliveryWithDetails format
     return {
       ...delivery,
       delivery_id: delivery.delivery_id.toString(),
+      phone_number: delivery.customer_note || null, // Map from existing field
+      created_at: delivery.order.create_at, // Map from order creation date
+      updated_at: delivery.order.create_at, // Map from order creation date
     } as DeliveryWithDetails;
   }
 
@@ -396,9 +400,13 @@ export class DeliveriesService {
       throw new NotFoundException(`Delivery for order ID ${orderId} not found`);
     }
 
+    // Convert to DeliveryWithDetails format
     return {
       ...delivery,
       delivery_id: delivery.delivery_id.toString(),
+      phone_number: delivery.customer_note || null, // Map from existing field
+      created_at: delivery.order.create_at, // Map from order creation date
+      updated_at: delivery.order.create_at, // Map from order creation date
     } as DeliveryWithDetails;
   }
 
@@ -435,7 +443,6 @@ export class DeliveriesService {
         },
       });
 
-      // Handle status change if status was updated
       if (
         updateDeliveryDto.status &&
         updateDeliveryDto.status !== existingDelivery.status
@@ -451,10 +458,11 @@ export class DeliveriesService {
 
       this.logger.log(`Successfully updated delivery ${id}`);
 
+      // Return delivery with converted delivery_id
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      } as Delivery;
+      } as unknown as Delivery;
     } catch (error) {
       this.logger.error(`Failed to update delivery ${id}:`, error);
       throw new BadRequestException(
@@ -471,7 +479,7 @@ export class DeliveriesService {
     updateStatusDto: UpdateStatusDto,
   ): Promise<Delivery> {
     const delivery = await this.findOne(id);
-    const currentStatus = delivery.status as DeliveryStatus;
+    const currentStatus = delivery.status;
     const newStatus = updateStatusDto.status;
 
     // Validate status transition
@@ -516,10 +524,11 @@ export class DeliveriesService {
         `Successfully updated delivery ${id} status to ${newStatus}`,
       );
 
+      // Return delivery with converted delivery_id
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      } as Delivery;
+      } as unknown as Delivery;
     } catch (error) {
       this.logger.error(`Failed to update status for delivery ${id}:`, error);
       throw new BadRequestException(
@@ -538,11 +547,12 @@ export class DeliveriesService {
     const delivery = await this.findOne(id);
     const orderData = delivery.order;
 
-    // Get previous time for tracking
     let previousTime: Date | undefined;
-    if (updateTimeDto.timeType === 'estimated_delivery_time') {
+    if (updateTimeDto.timeType === DeliveryTimeType.ESTIMATED_DELIVERY_TIME) {
       previousTime = delivery.estimated_delivery_time || undefined;
-    } else if (updateTimeDto.timeType === 'pickup_from_kitchen_time') {
+    } else if (
+      updateTimeDto.timeType === DeliveryTimeType.PICKUP_FROM_KITCHEN_TIME
+    ) {
       previousTime = delivery.pickup_from_kitchen_time || undefined;
     }
 
@@ -580,7 +590,7 @@ export class DeliveriesService {
       // Send notification to customer if requested
       if (
         updateTimeDto.notifyCustomer &&
-        updateTimeDto.timeType === 'estimated_delivery_time'
+        updateTimeDto.timeType === DeliveryTimeType.ESTIMATED_DELIVERY_TIME
       ) {
         const deliveryTimeStr = newTimeDate.toLocaleTimeString('en-US', {
           hour: '2-digit',
@@ -593,7 +603,7 @@ export class DeliveriesService {
 
         await this.createDeliveryNotification(
           delivery.order_id,
-          delivery.status as DeliveryStatus,
+          delivery.status,
           newTimeDate,
           message,
         );
@@ -603,10 +613,11 @@ export class DeliveriesService {
         `Successfully updated ${updateTimeDto.timeType} for delivery ${id}`,
       );
 
+      // Return delivery with converted delivery_id
       return {
         ...updatedDelivery,
         delivery_id: updatedDelivery.delivery_id.toString(),
-      } as Delivery;
+      } as unknown as Delivery;
     } catch (error) {
       this.logger.error(`Failed to update time for delivery ${id}:`, error);
       throw new BadRequestException(
@@ -810,7 +821,7 @@ export class DeliveriesService {
     const delivery = await this.findOne(id);
 
     // Only allow deletion if delivery hasn't been completed
-    if (delivery.status === DeliveryStatus.DELIVERED) {
+    if (delivery.status === DeliveryStatus.OUT_FOR_DELIVERY) {
       throw new ForbiddenException('Cannot delete a completed delivery');
     }
 
@@ -1145,7 +1156,7 @@ export class DeliveriesService {
 
     try {
       const history = JSON.parse(delivery.location_history as string);
-      return Array.isArray(history) ? history : [];
+      return Array.isArray(history) ? (history as LocationHistoryEntry[]) : [];
     } catch (error) {
       this.logger.warn(
         `Failed to parse location history for delivery ${delivery.id}:`,

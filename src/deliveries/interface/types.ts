@@ -1,3 +1,4 @@
+import { DeliveryStatus } from '../enums/delivery-status.enum';
 export interface LocationHistoryEntry {
   latitude: number;
   longitude: number;
@@ -51,11 +52,11 @@ export interface DeliveryNotificationPayload {
 export type DeliveryWithDetails = {
   id: number;
   order_id: number;
-  status: string;
+  status: DeliveryStatus;
   delivery_id: string;
   delivery_address: string | null;
   customer_note: string | null;
-  phone_number: string | null;
+  phone_number: string | null; // Added this property
   delivery_fee: number | null;
   estimated_delivery_time: Date | null;
   actual_delivery_time: Date | null;
@@ -65,8 +66,8 @@ export type DeliveryWithDetails = {
   last_location_update: Date | null;
   location_history: any;
   notes: string | null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date; // Added this property
+  updated_at: Date; // Added this property
   employee_id: number | null;
   order: {
     id: number;

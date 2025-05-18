@@ -5,3 +5,8 @@ export enum DeliveryStatus {
   DELIVERED = 'delivered',
   CANCELLED = 'cancelled',
 }
+
+export enum DeliveryTimeType {
+  ESTIMATED_DELIVERY_TIME = 'estimated_delivery_time',
+  PICKUP_FROM_KITCHEN_TIME = 'pickup_from_kitchen_time',
+}

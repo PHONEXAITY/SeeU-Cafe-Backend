@@ -10,21 +10,17 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-
-enum TimeUpdateType {
-  ESTIMATED_DELIVERY_TIME = 'estimated_delivery_time',
-  PICKUP_FROM_KITCHEN_TIME = 'pickup_from_kitchen_time',
-}
+import { DeliveryTimeType } from '../enums/delivery-status.enum';
 
 export class UpdateDeliveryTimeDto {
   @ApiProperty({
     description: 'Type of time to update',
-    enum: TimeUpdateType,
-    example: TimeUpdateType.ESTIMATED_DELIVERY_TIME,
+    enum: DeliveryTimeType,
+    example: DeliveryTimeType.ESTIMATED_DELIVERY_TIME,
   })
   @IsNotEmpty()
-  @IsEnum(TimeUpdateType)
-  timeType: TimeUpdateType;
+  @IsEnum(DeliveryTimeType)
+  timeType: DeliveryTimeType;
 
   @ApiProperty({
     description: 'New time value (ISO 8601 format)',
