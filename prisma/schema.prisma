@@ -55,9 +55,11 @@ model User {
   email_verified     Boolean           @default(false)
   social_provider    String?
   social_id          String?
+  email_notifications Boolean                @default(true)  
   email_verifications EmailVerification?
   password_resets    PasswordReset?
   notifications   CustomerNotification[]
+  pushSubscriptions  PushSubscription[] 
   documents       Document[]
   orders          Order[]
   orderHistories  OrderHistory[]
@@ -320,6 +322,18 @@ model CustomerNotification {
   @@index([order_id])
   @@index([read])
   @@index([type])
+}
+
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  user_id   Int
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  created_at DateTime @default(now())
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 model OrderTimeline {

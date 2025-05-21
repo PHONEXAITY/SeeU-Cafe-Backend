@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
 import { NotificationsGateway } from './notifications.gateway';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { EmailService } from 'src/email/email.service';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -10,6 +12,8 @@ export class CustomerNotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly pushNotificationsService: PushNotificationsService,
+    private readonly emailService: EmailService,
   ) {}
 
   async create(createNotificationDto: CreateNotificationDto) {
@@ -75,23 +79,104 @@ export class CustomerNotificationsService {
 
     if (createNotificationDto.broadcast) {
       this.notificationsGateway.sendNotificationToAll(notification);
+
+      await this.pushNotificationsService.sendBroadcastNotification({
+        title: this.getNotificationTitle(notification.type),
+        body: notification.message,
+        icon: '/logo.png',
+        badge: '/badge.png',
+        data: {
+          url: notification.action_url || '/notifications',
+          notificationId: notification.id,
+        },
+      });
+
+      const users = await this.prisma.user.findMany({
+        where: { email_notifications: true },
+      });
+      await this.emailService.sendBatchNotifications(users, notification);
     } else if (createNotificationDto.target_roles?.length) {
       const users = await this.prisma.user.findMany({
         where: {
           role: { name: { in: createNotificationDto.target_roles } },
         },
       });
+
       users.forEach((user) => {
         this.notificationsGateway.sendNotificationToUser(user.id, notification);
       });
+
+      await this.pushNotificationsService.sendNotificationToRoles(
+        createNotificationDto.target_roles,
+        {
+          title: this.getNotificationTitle(notification.type),
+          body: notification.message,
+          icon: '/logo.png',
+          badge: '/badge.png',
+          data: {
+            url: notification.action_url || '/notifications',
+            notificationId: notification.id,
+          },
+        },
+      );
+
+      const usersWithEmailEnabled = await this.prisma.user.findMany({
+        where: {
+          role: { name: { in: createNotificationDto.target_roles } },
+          email_notifications: true,
+        },
+      });
+      await this.emailService.sendBatchNotifications(
+        usersWithEmailEnabled,
+        notification,
+      );
     } else if (createNotificationDto.user_id) {
       this.notificationsGateway.sendNotificationToUser(
         createNotificationDto.user_id,
         notification,
       );
+
+      await this.pushNotificationsService.sendNotificationToUser(
+        createNotificationDto.user_id,
+        {
+          title: this.getNotificationTitle(notification.type),
+          body: notification.message,
+          icon: '/logo.png',
+          badge: '/badge.png',
+          data: {
+            url: notification.action_url || '/notifications',
+            notificationId: notification.id,
+          },
+        },
+      );
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: createNotificationDto.user_id },
+      });
+
+      if (user && user.email_notifications) {
+        await this.emailService.sendNotificationEmail(user, notification);
+      }
     }
 
     return notification;
+  }
+  private getNotificationTitle(type: string): string {
+    switch (type) {
+      case 'order_update':
+        return 'ອັບເດດຄຳສັ່ງຊື້ສຳເລັດ';
+      case 'time_change':
+        return 'ເວລາຄຳສັ່ງຊື້ມີການປ່ຽນແປງ';
+      case 'delivery_update':
+        return 'ອັບເດດການຈັດສົ່ງ';
+      case 'pickup_ready':
+        return 'ຄຳສັ່ງຊື້ພ້ອມໃຫ້ຮັບແລ້ວ';
+      case 'promotion':
+        return 'ໂປໂມຊັ່ນໃໝ່';
+      case 'info':
+      default:
+        return 'ການແຈ້ງເຕືອນໃໝ່';
+    }
   }
 
   async findAll(

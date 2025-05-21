@@ -25,6 +25,7 @@ import { SlideshowModule } from './slideshow/slideshow.module';
 import { SettingsModule } from './settings/settings.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CustomerNotificationsModule } from './customer-notifications/customer-notifications.module';
+import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 import { SessionModule } from './session/session.module';
 import { UserActivityMiddleware } from './session/user-activity.middleware';
 import { CartModule } from './cart/cart.module';
@@ -73,6 +74,7 @@ import { CartModule } from './cart/cart.module';
     OrdersModule,
     CartModule,
     CustomerNotificationsModule,
+    PushNotificationsModule,
     PaymentsModule,
     PromotionsModule,
     EmployeesModule,
