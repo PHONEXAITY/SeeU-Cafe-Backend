@@ -16,6 +16,12 @@ enum NotificationType {
   PICKUP_READY = 'pickup_ready',
   PROMOTION = 'promotion',
   INFO = 'info',
+  ORDER_CONFIRMED = 'order_confirmed',
+  ORDER_PREPARING = 'order_preparing',
+  ORDER_CANCELLED = 'order_cancelled',
+  ORDER_UNCLAIMED = 'order_unclaimed',
+  PAYMENT_STATUS = 'payment_status',
+  NEW_ORDER = 'new_order',
 }
 
 export class CreateNotificationDto {

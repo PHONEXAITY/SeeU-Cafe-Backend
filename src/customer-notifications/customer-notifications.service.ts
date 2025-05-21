@@ -173,6 +173,18 @@ export class CustomerNotificationsService {
         return 'ຄຳສັ່ງຊື້ພ້ອມໃຫ້ຮັບແລ້ວ';
       case 'promotion':
         return 'ໂປໂມຊັ່ນໃໝ່';
+      case 'order_confirmed':
+        return 'ຢືນຢັນຄຳສັ່ງຊື້';
+      case 'order_preparing':
+        return 'ກຳລັງກະກຽມການສັ່ງຊື້';
+      case 'order_cancelled':
+        return 'ການສັ່ງຊື້ຖືກຍົກເລີກ';
+      case 'order_unclaimed':
+        return 'ຄຳສັ່ງຊື້ຍັງບໍ່ໄດ້ຮັບການຍອມຮັບ';
+      case 'payment_status':
+        return 'ສະຖານະການຊຳລະເງິນ';
+      case 'new_order':
+        return 'ມີຄຳສັ່ງຊື້ໃໝ່';
       case 'info':
       default:
         return 'ການແຈ້ງເຕືອນໃໝ່';

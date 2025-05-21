@@ -65,6 +65,18 @@ export class EmailService {
         return 'Your Order Is Ready for Pickup';
       case 'promotion':
         return 'New Promotion Available';
+      case 'order_confirmed':
+        return 'Order Confirmation';
+      case 'order_preparing':
+        return 'Your Order is Being Prepared';
+      case 'order_cancelled':
+        return 'Your Order Has Been Cancelled';
+      case 'order_unclaimed':
+        return 'Your Order is Waiting for Pickup';
+      case 'payment_status':
+        return 'Payment Status Update';
+      case 'new_order':
+        return 'New Order Received';
       case 'info':
       default:
         return 'Important Information';
