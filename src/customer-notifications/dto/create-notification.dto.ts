@@ -9,23 +9,38 @@ import {
   IsArray,
 } from 'class-validator';
 
-enum NotificationType {
+export enum NotificationType {
+  // ประเภทการแจ้งเตือนเกี่ยวกับการอัพเดทสถานะออเดอร์
   ORDER_UPDATE = 'order_update',
   TIME_CHANGE = 'time_change',
-  DELIVERY_UPDATE = 'delivery_update',
-  PICKUP_READY = 'pickup_ready',
-  PROMOTION = 'promotion',
-  INFO = 'info',
   ORDER_CONFIRMED = 'order_confirmed',
   ORDER_PREPARING = 'order_preparing',
+  ORDER_READY = 'order_ready',
+  ORDER_COMPLETED = 'order_completed',
   ORDER_CANCELLED = 'order_cancelled',
   ORDER_UNCLAIMED = 'order_unclaimed',
+  ORDER_DELIVERED = 'order_delivered',
+
+  // ประเภทการแจ้งเตือนเกี่ยวกับการจัดส่ง
+  DELIVERY_UPDATE = 'delivery_update',
+  DELIVERY_ASSIGNED = 'delivery_assigned',
+  DELIVERY_STARTED = 'delivery_started',
+  DELIVERY_DELAYED = 'delivery_delayed',
+  DELIVERY_ARRIVED = 'delivery_arrived',
+
+  // ประเภทการแจ้งเตือนเกี่ยวกับการรับสินค้า
+  PICKUP_READY = 'pickup_ready',
+  PICKUP_REMINDER = 'pickup_reminder',
+
+  // ประเภทการแจ้งเตือนอื่นๆ
+  PROMOTION = 'promotion',
+  INFO = 'info',
   PAYMENT_STATUS = 'payment_status',
   NEW_ORDER = 'new_order',
 }
 
 export class CreateNotificationDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
       'ID of the user to send notification to (optional if targeting roles or broadcasting)',
     example: 1,

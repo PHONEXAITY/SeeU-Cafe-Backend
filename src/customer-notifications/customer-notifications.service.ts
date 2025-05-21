@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateNotificationDto } from './dto/create-notification.dto';
+import {
+  CreateNotificationDto,
+  NotificationType,
+} from './dto/create-notification.dto';
 import { UpdateNotificationDto } from './dto/update-notification.dto';
 import { NotificationsGateway } from './notifications.gateway';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
-import { EmailService } from 'src/email/email.service';
-import { Prisma } from '@prisma/client';
+import { EmailService } from '../email/email.service';
+import { Prisma, Order } from '@prisma/client';
 
 @Injectable()
 export class CustomerNotificationsService {
@@ -161,34 +164,266 @@ export class CustomerNotificationsService {
 
     return notification;
   }
+
   private getNotificationTitle(type: string): string {
-    switch (type) {
-      case 'order_update':
-        return 'ອັບເດດຄຳສັ່ງຊື້ສຳເລັດ';
-      case 'time_change':
-        return 'ເວລາຄຳສັ່ງຊື້ມີການປ່ຽນແປງ';
-      case 'delivery_update':
-        return 'ອັບເດດການຈັດສົ່ງ';
-      case 'pickup_ready':
-        return 'ຄຳສັ່ງຊື້ພ້ອມໃຫ້ຮັບແລ້ວ';
-      case 'promotion':
-        return 'ໂປໂມຊັ່ນໃໝ່';
-      case 'order_confirmed':
-        return 'ຢືນຢັນຄຳສັ່ງຊື້';
-      case 'order_preparing':
-        return 'ກຳລັງກະກຽມການສັ່ງຊື້';
-      case 'order_cancelled':
-        return 'ການສັ່ງຊື້ຖືກຍົກເລີກ';
-      case 'order_unclaimed':
-        return 'ຄຳສັ່ງຊື້ຍັງບໍ່ໄດ້ຮັບການຍອມຮັບ';
-      case 'payment_status':
-        return 'ສະຖານະການຊຳລະເງິນ';
-      case 'new_order':
-        return 'ມີຄຳສັ່ງຊື້ໃໝ່';
-      case 'info':
-      default:
-        return 'ການແຈ້ງເຕືອນໃໝ່';
+    // Using a mapping approach to avoid direct enum comparisons
+    const titleMap: Record<string, string> = {
+      [NotificationType.ORDER_UPDATE]: 'ອັບເດດຄຳສັ່ງຊື້ສຳເລັດ',
+      [NotificationType.TIME_CHANGE]: 'ເວລາຄຳສັ່ງຊື້ມີການປ່ຽນແປງ',
+      [NotificationType.ORDER_CONFIRMED]: 'ຢືນຢັນຄຳສັ່ງຊື້',
+      [NotificationType.ORDER_PREPARING]: 'ກຳລັງກະກຽມການສັ່ງຊື້',
+      [NotificationType.ORDER_READY]: 'ຄຳສັ່ງຊື້ພ້ອມແລ້ວ',
+      [NotificationType.ORDER_COMPLETED]: 'ຄຳສັ່ງຊື້ສຳເລັດແລ້ວ',
+      [NotificationType.ORDER_CANCELLED]: 'ການສັ່ງຊື້ຖືກຍົກເລີກ',
+      [NotificationType.ORDER_UNCLAIMED]: 'ຄຳສັ່ງຊື້ຍັງບໍ່ໄດ້ຮັບການຍອມຮັບ',
+      [NotificationType.ORDER_DELIVERED]: 'ຄຳສັ່ງຊື້ຖືກຈັດສົ່ງແລ້ວ',
+      [NotificationType.DELIVERY_UPDATE]: 'ອັບເດດການຈັດສົ່ງ',
+      [NotificationType.DELIVERY_ASSIGNED]: 'ມອບໝາຍພະນັກງານຈັດສົ່ງແລ້ວ',
+      [NotificationType.DELIVERY_STARTED]: 'ເລີ່ມການຈັດສົ່ງແລ້ວ',
+      [NotificationType.DELIVERY_DELAYED]: 'ການຈັດສົ່ງລ່າຊ້າ',
+      [NotificationType.DELIVERY_ARRIVED]: 'ພະນັກງານຈັດສົ່ງມາຮອດແລ້ວ',
+      [NotificationType.PICKUP_READY]: 'ຄຳສັ່ງຊື້ພ້ອມໃຫ້ຮັບແລ້ວ',
+      [NotificationType.PICKUP_REMINDER]:
+        'ເຕືອນຄວາມຈໍາ: ຄຳສັ່ງຊື້ຂອງທ່ານລໍຖ້າໃຫ້ມາຮັບ',
+      [NotificationType.PAYMENT_STATUS]: 'ສະຖານະການຊຳລະເງິນ',
+      [NotificationType.NEW_ORDER]: 'ມີຄຳສັ່ງຊື້ໃໝ່',
+      [NotificationType.PROMOTION]: 'ໂປໂມຊັ່ນໃໝ່',
+      [NotificationType.INFO]: 'ການແຈ້ງເຕືອນໃໝ່',
+    };
+
+    return titleMap[type] || 'ການແຈ້ງເຕືອນໃໝ່';
+  }
+
+  async createOrderStatusNotification(
+    order: Order,
+    status: string,
+    additionalMessage?: string,
+  ) {
+    const orderWithUser = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { user: true },
+    });
+
+    if (!orderWithUser) {
+      throw new NotFoundException(`Order with ID ${order.id} not found`);
     }
+
+    // Map status string to notification type
+    const statusToTypeMap: Record<string, string> = {
+      confirmed: NotificationType.ORDER_CONFIRMED,
+      preparing: NotificationType.ORDER_PREPARING,
+      ready: NotificationType.ORDER_READY,
+      completed: NotificationType.ORDER_COMPLETED,
+      cancelled: NotificationType.ORDER_CANCELLED,
+      unclaimed: NotificationType.ORDER_UNCLAIMED,
+      pickup_ready: NotificationType.PICKUP_READY,
+      delivered: NotificationType.ORDER_DELIVERED,
+    };
+
+    const type = statusToTypeMap[status] || NotificationType.ORDER_UPDATE;
+    let message = '';
+    const actionUrl = `/orders/${order.order_id}`;
+
+    // Map status to appropriate message
+    const statusToMessageMap: Record<string, string> = {
+      confirmed: `ຄຳສັ່ງຊື້ #${order.order_id} ໄດ້ຮັບການຢືນຢັນແລ້ວ`,
+      preparing: `ກຳລັງກະກຽມຄຳສັ່ງຊື້ #${order.order_id}`,
+      ready: `ຄຳສັ່ງຊື້ #${order.order_id} ພ້ອມແລ້ວ`,
+      completed: `ຄຳສັ່ງຊື້ #${order.order_id} ສຳເລັດແລ້ວ`,
+      cancelled: `ຄຳສັ່ງຊື້ #${order.order_id} ຖືກຍົກເລີກ`,
+      unclaimed: `ຄຳສັ່ງຊື້ #${order.order_id} ຍັງລໍຖ້າທ່ານມາຮັບ`,
+      pickup_ready: `ຄຳສັ່ງຊື້ #${order.order_id} ພ້ອມໃຫ້ທ່ານມາຮັບແລ້ວ`,
+      delivered: `ຄຳສັ່ງຊື້ #${order.order_id} ໄດ້ຖືກຈັດສົ່ງຮອດທ່ານແລ້ວ`,
+    };
+
+    message =
+      statusToMessageMap[status] ||
+      `ອັບເດດຄຳສັ່ງຊື້ #${order.order_id}: ${status}`;
+
+    if (additionalMessage) {
+      message = `${message}. ${additionalMessage}`;
+    }
+
+    if (orderWithUser.user?.id) {
+      const notificationData: CreateNotificationDto = {
+        user_id: orderWithUser.user.id,
+        order_id: order.id,
+        message,
+        type,
+        action_url: actionUrl,
+      };
+
+      return this.create(notificationData);
+    }
+
+    return null;
+  }
+
+  async createOrderTimeChangeNotification(
+    order: Order,
+    previousTime: Date,
+    newTime: Date,
+    reason?: string,
+  ) {
+    const orderWithUser = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { user: true },
+    });
+
+    if (!orderWithUser) {
+      throw new NotFoundException(`Order with ID ${order.id} not found`);
+    }
+
+    const timeDiffInMinutes = Math.round(
+      (newTime.getTime() - previousTime.getTime()) / (1000 * 60),
+    );
+
+    let timeDiffMessage = '';
+    if (timeDiffInMinutes > 0) {
+      timeDiffMessage = `ຖືກເລື່ອນອອກໄປອີກ ${timeDiffInMinutes} ນາທີ`;
+    } else if (timeDiffInMinutes < 0) {
+      timeDiffMessage = `ເລື່ອນໄວຂຶ້ນ ${Math.abs(timeDiffInMinutes)} ນາທີ`;
+    }
+
+    let message = `ເວລາຄຳສັ່ງຊື້ #${order.order_id} ${timeDiffMessage}`;
+
+    if (reason) {
+      message = `${message}. ສາເຫດ: ${reason}`;
+    }
+
+    const actionUrl = `/orders/${order.order_id}`;
+
+    if (orderWithUser.user?.id) {
+      const notificationData: CreateNotificationDto = {
+        user_id: orderWithUser.user.id,
+        order_id: order.id,
+        message,
+        type: NotificationType.TIME_CHANGE,
+        action_url: actionUrl,
+      };
+
+      return this.create(notificationData);
+    }
+
+    return null;
+  }
+
+  async createDeliveryNotification(
+    order: Order,
+    status: string,
+    additionalInfo?: string,
+  ) {
+    const orderWithUser = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { user: true, delivery: true },
+    });
+
+    if (!orderWithUser) {
+      throw new NotFoundException(`Order with ID ${order.id} not found`);
+    }
+
+    // Map status string to notification type
+    const statusToTypeMap: Record<string, string> = {
+      assigned: NotificationType.DELIVERY_ASSIGNED,
+      started: NotificationType.DELIVERY_STARTED,
+      delayed: NotificationType.DELIVERY_DELAYED,
+      arrived: NotificationType.DELIVERY_ARRIVED,
+    };
+
+    const type = statusToTypeMap[status] || NotificationType.DELIVERY_UPDATE;
+
+    // Map status to appropriate message
+    const statusToMessageMap: Record<string, string> = {
+      assigned: `ພະນັກງານຈັດສົ່ງໄດ້ຮັບມອບໝາຍໃຫ້ສົ່ງຄຳສັ່ງຊື້ #${order.order_id} ຂອງທ່ານແລ້ວ`,
+      started: `ການຈັດສົ່ງຄຳສັ່ງຊື້ #${order.order_id} ໄດ້ເລີ່ມຕົ້ນແລ້ວ`,
+      delayed: `ການຈັດສົ່ງຄຳສັ່ງຊື້ #${order.order_id} ອາດຈະຊ້າກວ່າກຳນົດ`,
+      arrived: `ພະນັກງານຈັດສົ່ງມາຮອດຈຸດນັດໝາຍຂອງຄຳສັ່ງຊື້ #${order.order_id} ແລ້ວ`,
+    };
+
+    const message =
+      statusToMessageMap[status] ||
+      `ອັບເດດການຈັດສົ່ງຄຳສັ່ງຊື້ #${order.order_id}: ${status}`;
+    const actionUrl = `/orders/${order.order_id}`;
+
+    const finalMessage = additionalInfo
+      ? `${message}. ${additionalInfo}`
+      : message;
+
+    if (orderWithUser.user?.id) {
+      const notificationData: CreateNotificationDto = {
+        user_id: orderWithUser.user.id,
+        order_id: order.id,
+        message: finalMessage,
+        type,
+        action_url: actionUrl,
+      };
+
+      return this.create(notificationData);
+    }
+
+    return null;
+  }
+
+  async createPaymentStatusNotification(order: Order, status: string) {
+    const orderWithUser = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { user: true },
+    });
+
+    if (!orderWithUser) {
+      throw new NotFoundException(`Order with ID ${order.id} not found`);
+    }
+
+    // Map status to appropriate message
+    const statusToMessageMap: Record<string, string> = {
+      confirmed: `ການຊຳລະເງິນສຳລັບຄຳສັ່ງຊື້ #${order.order_id} ໄດ້ຮັບການຢືນຢັນແລ້ວ`,
+      pending: `ລໍຖ້າການຊຳລະເງິນສຳລັບຄຳສັ່ງຊື້ #${order.order_id}`,
+      failed: `ການຊຳລະເງິນສຳລັບຄຳສັ່ງຊື້ #${order.order_id} ລົ້ມເຫລວ`,
+      refunded: `ທ່ານໄດ້ຮັບເງິນຄືນສຳລັບຄຳສັ່ງຊື້ #${order.order_id}`,
+    };
+
+    const message =
+      statusToMessageMap[status] ||
+      `ສະຖານະການຊຳລະເງິນສຳລັບຄຳສັ່ງຊື້ #${order.order_id}: ${status}`;
+    const actionUrl = `/orders/${order.order_id}`;
+
+    if (orderWithUser.user?.id) {
+      const notificationData: CreateNotificationDto = {
+        user_id: orderWithUser.user.id,
+        order_id: order.id,
+        message,
+        type: NotificationType.PAYMENT_STATUS,
+        action_url: actionUrl,
+      };
+
+      return this.create(notificationData);
+    }
+
+    return null;
+  }
+
+  async createPickupReminderNotification(order: Order) {
+    const orderWithUser = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { user: true },
+    });
+
+    if (!orderWithUser || !orderWithUser.user?.id) {
+      return null;
+    }
+
+    const message = `ເຕືອນຄວາມຈໍາ: ຄຳສັ່ງຊື້ #${order.order_id} ຂອງທ່ານຍັງລໍຖ້າທ່ານຢູ່ທີ່ຮ້ານ`;
+    const actionUrl = `/orders/${order.order_id}`;
+
+    const notificationData: CreateNotificationDto = {
+      user_id: orderWithUser.user.id,
+      order_id: order.id,
+      message,
+      type: NotificationType.PICKUP_REMINDER,
+      action_url: actionUrl,
+    };
+
+    return this.create(notificationData);
   }
 
   async findAll(
@@ -235,7 +470,7 @@ export class CustomerNotificationsService {
 
   async findOne(id: number) {
     const notification = await this.prisma.customerNotification.findUnique({
-      where: { id: id },
+      where: { id },
       include: {
         user: {
           select: {
@@ -256,8 +491,6 @@ export class CustomerNotificationsService {
   }
 
   async findAllByUser(userId: number) {
-    console.log('Fetching notifications for user:', userId);
-
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { role: true },
@@ -268,7 +501,6 @@ export class CustomerNotificationsService {
     }
 
     const userRole = user.role ? user.role.name : null;
-    console.log('User role:', userRole);
 
     const orConditions: Prisma.CustomerNotificationWhereInput[] = [
       { user_id: userId },
@@ -283,7 +515,7 @@ export class CustomerNotificationsService {
       });
     }
 
-    const notifications = await this.prisma.customerNotification.findMany({
+    return this.prisma.customerNotification.findMany({
       where: {
         OR: orConditions,
       },
@@ -301,12 +533,6 @@ export class CustomerNotificationsService {
         created_at: 'desc',
       },
     });
-
-    console.log(
-      `Found ${notifications.length} notifications for user ${userId}`,
-    );
-
-    return notifications;
   }
 
   async findAllBroadcast() {
