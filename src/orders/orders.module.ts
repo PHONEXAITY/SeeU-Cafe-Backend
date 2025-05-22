@@ -10,9 +10,10 @@ import { TimeUpdateController } from './time-update/time-update.controller';
 import { OrderHistoryService } from './order-history/order-history.service';
 import { OrderHistoryController } from './order-history/order-history.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { CustomerNotificationsModule } from '../customer-notifications/customer-notifications.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, CustomerNotificationsModule],
   controllers: [
     OrdersController,
     OrderDetailsController,
