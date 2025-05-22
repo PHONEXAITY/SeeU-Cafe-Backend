@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   UseGuards,
+  Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CustomerNotificationsService } from './customer-notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
@@ -43,8 +45,37 @@ export class CustomerNotificationsController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async create(@Body() createNotificationDto: CreateNotificationDto) {
+  async create(
+    @Body() createNotificationDto: CreateNotificationDto,
+    @Request() req,
+  ) {
+    if (createNotificationDto.target_roles) {
+      const userRole = req.user.role;
+      const canSendToRoles = this.validateRolePermissions(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        userRole,
+        createNotificationDto.target_roles,
+      );
+      if (!canSendToRoles) {
+        throw new ForbiddenException(
+          'You do not have permission to send notifications to these roles.',
+        );
+      }
+    }
     return this.notificationsService.create(createNotificationDto);
+  }
+
+  private validateRolePermissions(
+    userRole: string,
+    targetRoles: string[],
+  ): boolean {
+    if (userRole === 'admin') return true;
+
+    if (userRole === 'employee') {
+      return targetRoles.every((role) => role === 'customer');
+    }
+
+    return false;
   }
 
   @Get()

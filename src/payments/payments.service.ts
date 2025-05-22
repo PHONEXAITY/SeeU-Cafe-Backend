@@ -202,7 +202,7 @@ export class PaymentsService {
         data: {
           user_id: payment.order.user.id,
           order_id: payment.order_id,
-          message: `Your payment for order #${payment.order.order_id} has been rejected. ${reason ? `Reason: ${reason}` : ''}`,
+          message: `ການຊໍາລະເງິນສໍາລັບຄໍາສັ່ງຂອງທ່ານ #${payment.order.order_id} ຖືກປະຕິເສດແລ້ວ. ${reason ? `ເຫດຜົນ: ${reason}` : ''}`,
           type: 'payment_rejected',
           action_url: `/orders/${payment.order.order_id}`,
         },
@@ -328,7 +328,7 @@ export class PaymentsService {
           data: {
             user_id: payment.order.user.id,
             order_id: payment.order_id,
-            message: `Your payment of ${payment.amount.toFixed(2)} for order #${payment.order.order_id} has been refunded.`,
+            message: `ການຊຳລະຂອງທ່ານຈຳນວນ ${payment.amount.toFixed(2)} ສຳລັບການສັ່ງຊື້ #${payment.order.order_id} ໄດ້ຮັບການຄືນເງີນແລ້ວ.`,
             type: 'payment_refunded',
             action_url: `/orders/${payment.order.order_id}`,
           },
@@ -373,7 +373,7 @@ export class PaymentsService {
           data: {
             user_id: updatedPayment.order.user.id,
             order_id: updatedPayment.order_id,
-            message: `Your payment of ${updatedPayment.amount.toFixed(2)} for order #${updatedPayment.order.order_id} has been refunded.`,
+            message: `ການຊຳລະຂອງທ່ານຈຳນວນ ${updatedPayment.amount.toFixed(2)} ສຳລັບການສັ່ງຊື້ #${updatedPayment.order.order_id} ໄດ້ຮັບການຄືນເງີນແລ້ວ.`,
             type: 'payment_refunded',
             action_url: `/orders/${updatedPayment.order.order_id}`,
           },
@@ -416,7 +416,7 @@ export class PaymentsService {
         data: {
           user_id: payment.order.user.id,
           order_id: payment.order_id,
-          message: `Your payment of ${payment.amount.toFixed(2)} for order #${payment.order.order_id} has been approved.`,
+          message: `ການຊຳລະຂອງທ່ານຈຳນວນ ${payment.amount.toFixed(2)} ສຳລັບການສັ່ງຊື້ #${payment.order.order_id} ໄດ້ຮັບການຢຶນຢັນແລ້ວ.`,
           type: 'payment_approved',
           action_url: `/orders/${payment.order.order_id}`,
         },
@@ -427,7 +427,7 @@ export class PaymentsService {
   private async notifyAdmin(payment: any) {
     await this.prisma.customerNotification.create({
       data: {
-        message: `New payment proof uploaded for order #${payment.order.order_id}`,
+        message: `ມີການອັບໂຫຼດຫຼັກຖານການຊໍາລະເງິນໃໝ່ຂອງການສັ່ງຊື້ #${payment.order.order_id}`,
         type: 'payment_proof',
         target_roles: ['admin'],
         broadcast: false,

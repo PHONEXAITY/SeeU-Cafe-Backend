@@ -43,6 +43,7 @@ export class PaymentsGateway {
 
     client.rooms.forEach((room) => {
       if (room !== client.id) {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
         client.leave(room);
         this.logger.log(`Client ${client.id} left room: ${room}`);
       }

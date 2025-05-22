@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsNotEmpty,
@@ -7,7 +8,11 @@ import {
   IsOptional,
   IsBoolean,
   IsArray,
+  Length,
+  Matches,
+  IsUrl,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export enum NotificationType {
   // ประเภทการแจ้งเตือนเกี่ยวกับการอัพเดทสถานะออเดอร์
@@ -63,6 +68,11 @@ export class CreateNotificationDto {
   })
   @IsString()
   @IsNotEmpty()
+  @Length(1, 500)
+  @Matches(/^[^<>{}]*$/, {
+    message: 'The message contains invalid characters.',
+  })
+  @Transform(({ value }) => value?.trim().replace(/\s+/g, ' '))
   message: string;
 
   @ApiProperty({
@@ -80,6 +90,8 @@ export class CreateNotificationDto {
   })
   @IsString()
   @IsOptional()
+  @IsUrl({}, { message: 'Invalid URL format' })
+  @Matches(/^\/[a-zA-Z0-9/_-]*$/, { message: 'URL must be within' })
   action_url?: string;
 
   @ApiPropertyOptional({
