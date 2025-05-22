@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateNotificationDto,
@@ -12,6 +12,7 @@ import { Prisma, Order } from '@prisma/client';
 
 @Injectable()
 export class CustomerNotificationsService {
+  private readonly logger = new Logger(CustomerNotificationsService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
@@ -253,10 +254,66 @@ export class CustomerNotificationsService {
         action_url: actionUrl,
       };
 
-      return this.create(notificationData);
+      const notification = await this.create(notificationData);
+
+      // 🔥 NEW: Send push notification
+      try {
+        await this.pushNotificationsService.sendNotificationToUser(
+          orderWithUser.user.id,
+          {
+            title: this.getNotificationTitle(type),
+            body: message,
+            icon: '/logo.png',
+            badge: '/badge.png',
+            data: {
+              url: actionUrl,
+              notificationId: notification.id,
+              orderId: order.id,
+              type: type,
+            },
+            actions: [
+              {
+                action: 'view',
+                title: 'ดูรายละเอียด',
+              },
+            ],
+            tag: `order-${order.id}`,
+            requireInteraction: ['order_ready', 'pickup_ready'].includes(
+              status,
+            ),
+          },
+        );
+      } catch (pushError) {
+        this.logger.error('Failed to send push notification:', pushError);
+        // Don't fail the notification creation if push fails
+      }
+
+      return notification;
     }
 
     return null;
+  }
+  async sendImmediatePushNotification(
+    userId: number,
+    title: string,
+    message: string,
+    data?: any,
+  ) {
+    try {
+      await this.pushNotificationsService.sendNotificationToUser(userId, {
+        title,
+        body: message,
+        icon: '/logo.png',
+        badge: '/badge.png',
+        data: data || {},
+        timestamp: Date.now(),
+      });
+
+      return true;
+    } catch (error) {
+      this.logger.error('Failed to send immediate push notification:', error);
+      return false;
+    }
   }
 
   async createOrderTimeChangeNotification(
