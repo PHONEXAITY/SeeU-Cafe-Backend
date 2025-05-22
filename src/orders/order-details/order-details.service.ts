@@ -4,16 +4,29 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CustomerNotificationsService } from '../../customer-notifications/customer-notifications.service';
 import { CreateOrderDetailDto } from './dto/create-order-detail.dto';
 import { UpdateOrderDetailDto } from './dto/update-order-detail.dto';
 
 @Injectable()
 export class OrderDetailsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly customerNotificationsService: CustomerNotificationsService,
+  ) {}
 
   async create(orderId: number, createOrderDetailDto: CreateOrderDetailDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
     });
 
     if (!order) {
@@ -106,6 +119,24 @@ export class OrderDetailsService {
         where: { id: orderId },
         data: { estimated_ready_time: estimatedReadyTime },
       });
+
+      // 🔥 NEW: Send notification about updated estimated time
+      try {
+        if (order.user?.id) {
+          await this.customerNotificationsService.create({
+            user_id: order.user.id,
+            order_id: orderId,
+            message: `ມີການເພີ່ມເມນູໃນຄຳສັ່ງຊື້ #${order.order_id}. ເວລາຄາດຄະເນໃໝ່: ${estimatedReadyTime.toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}`,
+            type: 'order_update',
+            action_url: `/orders/${order.order_id}`,
+          });
+        }
+      } catch (notificationError) {
+        console.error(
+          'Failed to send order detail creation notification:',
+          notificationError,
+        );
+      }
     }
 
     return orderDetail;
@@ -187,6 +218,17 @@ export class OrderDetailsService {
       include: {
         food_menu: true,
         beverage_menu: true,
+        order: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -217,6 +259,47 @@ export class OrderDetailsService {
             notes: 'All items are ready',
           },
         });
+
+        // 🔥 NEW: Send notification when all items are ready
+        try {
+          if (updatedDetail.order.user?.id) {
+            await this.customerNotificationsService.create({
+              user_id: updatedDetail.order.user.id,
+              order_id: orderId,
+              message: `ຄຳສັ່ງຊື້ #${updatedDetail.order.order_id} ທັງໝົດພ້ອມແລ້ວ! ສາມາດມາຮັບໄດ້`,
+              type: 'order_ready',
+              action_url: `/orders/${updatedDetail.order.order_id}`,
+            });
+          }
+        } catch (notificationError) {
+          console.error(
+            'Failed to send all items ready notification:',
+            notificationError,
+          );
+        }
+      } else {
+        // 🔥 NEW: Send notification about individual item being ready
+        try {
+          if (updatedDetail.order.user?.id) {
+            const itemName =
+              updatedDetail.food_menu?.name ||
+              updatedDetail.beverage_menu?.name ||
+              'ລາຍການ';
+
+            await this.customerNotificationsService.create({
+              user_id: updatedDetail.order.user.id,
+              order_id: orderId,
+              message: `${itemName} ໃນຄຳສັ່ງຊື້ #${updatedDetail.order.order_id} ພ້ອມແລ້ວ`,
+              type: 'order_update',
+              action_url: `/orders/${updatedDetail.order.order_id}`,
+            });
+          }
+        } catch (notificationError) {
+          console.error(
+            'Failed to send item ready notification:',
+            notificationError,
+          );
+        }
       }
     }
 
@@ -232,6 +315,17 @@ export class OrderDetailsService {
       include: {
         food_menu: true,
         beverage_menu: true,
+        order: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -257,6 +351,47 @@ export class OrderDetailsService {
           notes: 'All items are ready',
         },
       });
+
+      // 🔥 NEW: Send notification when all items are ready
+      try {
+        if (updatedDetail.order.user?.id) {
+          await this.customerNotificationsService.create({
+            user_id: updatedDetail.order.user.id,
+            order_id: orderDetail.order_id,
+            message: `ຄຳສັ່ງຊື້ #${updatedDetail.order.order_id} ທັງໝົດພ້ອມແລ້ວ! ສາມາດມາຮັບໄດ້`,
+            type: 'order_ready',
+            action_url: `/orders/${updatedDetail.order.order_id}`,
+          });
+        }
+      } catch (notificationError) {
+        console.error(
+          'Failed to send all items ready notification:',
+          notificationError,
+        );
+      }
+    } else {
+      // 🔥 NEW: Send notification about individual item being ready
+      try {
+        if (updatedDetail.order.user?.id) {
+          const itemName =
+            updatedDetail.food_menu?.name ||
+            updatedDetail.beverage_menu?.name ||
+            'ລາຍການ';
+
+          await this.customerNotificationsService.create({
+            user_id: updatedDetail.order.user.id,
+            order_id: orderDetail.order_id,
+            message: `${itemName} ໃນຄຳສັ່ງຊື້ #${updatedDetail.order.order_id} ພ້ອມແລ້ວ`,
+            type: 'order_update',
+            action_url: `/orders/${updatedDetail.order.order_id}`,
+          });
+        }
+      } catch (notificationError) {
+        console.error(
+          'Failed to send item ready notification:',
+          notificationError,
+        );
+      }
     }
 
     return updatedDetail;
@@ -264,8 +399,21 @@ export class OrderDetailsService {
 
   async remove(id: number) {
     const orderDetail = await this.findOne(id);
-
     const orderId = orderDetail.order_id;
+
+    // Get order details before deletion for notification
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
+    });
 
     await this.prisma.orderDetail.delete({
       where: { id },
@@ -300,6 +448,47 @@ export class OrderDetailsService {
           where: { id: orderId },
           data: { estimated_ready_time: estimatedReadyTime },
         });
+
+        // 🔥 NEW: Send notification about updated estimated time after item removal
+        try {
+          if (order?.user?.id) {
+            const itemName =
+              orderDetail.food_menu?.name ||
+              orderDetail.beverage_menu?.name ||
+              'ລາຍການ';
+
+            await this.customerNotificationsService.create({
+              user_id: order.user.id,
+              order_id: orderId,
+              message: `${itemName} ຖືກລຶບອອກຈາກຄຳສັ່ງຊື້ #${order.order_id}. ເວລາຄາດຄະເນໃໝ່: ${estimatedReadyTime.toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}`,
+              type: 'order_update',
+              action_url: `/orders/${order.order_id}`,
+            });
+          }
+        } catch (notificationError) {
+          console.error(
+            'Failed to send order detail removal notification:',
+            notificationError,
+          );
+        }
+      }
+    } else {
+      // 🔥 NEW: Send notification if all items were removed
+      try {
+        if (order?.user?.id) {
+          await this.customerNotificationsService.create({
+            user_id: order.user.id,
+            order_id: orderId,
+            message: `ລາຍການທັງໝົດຖືກລຶບອອກຈາກຄຳສັ່ງຊື້ #${order.order_id}`,
+            type: 'order_update',
+            action_url: `/orders/${order.order_id}`,
+          });
+        }
+      } catch (notificationError) {
+        console.error(
+          'Failed to send all items removed notification:',
+          notificationError,
+        );
       }
     }
 

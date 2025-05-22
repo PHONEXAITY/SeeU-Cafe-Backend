@@ -21,7 +21,6 @@ import {
   LocationHistoryEntry,
   DeliveryWithDetails,
   DeliveryLocationInfo,
-  DeliveryNotificationPayload,
 } from './interface/types';
 
 @Injectable()
@@ -51,7 +50,7 @@ export class DeliveriesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly notificationsService: CustomerNotificationsService,
+    private readonly customerNotificationsService: CustomerNotificationsService,
   ) {}
 
   /**
@@ -134,12 +133,32 @@ export class DeliveriesService {
         );
       }
 
-      // Send notification to customer
-      await this.createDeliveryNotification(
-        createDeliveryDto.order_id,
-        status,
-        estimatedDeliveryTime,
-      );
+      // 🔥 NEW: Send delivery creation notification
+      try {
+        if (delivery.order.user?.id) {
+          await this.customerNotificationsService.create({
+            user_id: delivery.order.user.id,
+            order_id: delivery.order_id,
+            message: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ໄດ້ຖືກສ້າງແລ້ວ. ເວລາຄາດຄະເນ: ${estimatedDeliveryTime.toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}`,
+            type: 'delivery_update',
+            action_url: `/orders/${delivery.order.order_id}`,
+          });
+        }
+
+        // Notify employees about new delivery
+        await this.customerNotificationsService.create({
+          message: `ມີການຈັດສົ່ງໃໝ່ສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id}`,
+          type: 'delivery_update',
+          order_id: delivery.order_id,
+          target_roles: ['admin', 'employee'],
+          action_url: `/admin/deliveries/${delivery.id}`,
+        });
+      } catch (notificationError) {
+        this.logger.error(
+          'Failed to send delivery creation notifications:',
+          notificationError,
+        );
+      }
 
       this.logger.log(
         `Successfully created delivery ${delivery.id} for order ${createDeliveryDto.order_id}`,
@@ -587,25 +606,34 @@ export class DeliveriesService {
         },
       });
 
-      // Send notification to customer if requested
-      if (
-        updateTimeDto.notifyCustomer &&
-        updateTimeDto.timeType === DeliveryTimeType.ESTIMATED_DELIVERY_TIME
-      ) {
-        const deliveryTimeStr = newTimeDate.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
+      // 🔥 NEW: Send time update notification
+      try {
+        if (
+          updateTimeDto.notifyCustomer &&
+          updateTimeDto.timeType === DeliveryTimeType.ESTIMATED_DELIVERY_TIME &&
+          orderData.User_id
+        ) {
+          const deliveryTimeStr = newTimeDate.toLocaleTimeString('lo-LA', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
 
-        const message =
-          updateTimeDto.notificationMessage ||
-          `Your delivery time for order #${orderData.order_id} has been updated. New estimated delivery time: ${deliveryTimeStr}.`;
+          const message =
+            updateTimeDto.notificationMessage ||
+            `ເວລາການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${orderData.order_id} ມີການປ່ຽນແປງ. ເວລາໃໝ່: ${deliveryTimeStr}`;
 
-        await this.createDeliveryNotification(
-          delivery.order_id,
-          delivery.status,
-          newTimeDate,
-          message,
+          await this.customerNotificationsService.create({
+            user_id: orderData.User_id,
+            order_id: delivery.order_id,
+            message,
+            type: 'time_change',
+            action_url: `/orders/${orderData.order_id}`,
+          });
+        }
+      } catch (notificationError) {
+        this.logger.error(
+          'Failed to send time update notification:',
+          notificationError,
         );
       }
 
@@ -688,9 +716,29 @@ export class DeliveriesService {
         },
       });
 
-      // Send notification to customer if requested
-      if (updateLocationDto.notifyCustomer && updatedDelivery.order?.user?.id) {
-        await this.notifyLocationUpdate(updatedDelivery);
+      // 🔥 NEW: Send location update notification
+      try {
+        if (
+          updateLocationDto.notifyCustomer &&
+          updatedDelivery.order?.user?.id
+        ) {
+          const employeeName = updatedDelivery.employee
+            ? `${updatedDelivery.employee.first_name || ''} ${updatedDelivery.employee.last_name || ''}`.trim()
+            : 'ພະນັກງານຈັດສົ່ງ';
+
+          await this.customerNotificationsService.create({
+            user_id: updatedDelivery.order.user.id,
+            order_id: updatedDelivery.order_id,
+            message: `${employeeName} ໄດ້ອັບເດດທີ່ຕັ້ງສຳລັບການຈັດສົ່ງຄຳສັ່ງຊື້ #${updatedDelivery.order.order_id}`,
+            type: 'delivery_update',
+            action_url: `/orders/${updatedDelivery.order.order_id}/track`,
+          });
+        }
+      } catch (notificationError) {
+        this.logger.error(
+          'Failed to send location update notification:',
+          notificationError,
+        );
       }
 
       this.logger.log(`Successfully updated location for delivery ${id}`);
@@ -821,7 +869,7 @@ export class DeliveriesService {
     const delivery = await this.findOne(id);
 
     // Only allow deletion if delivery hasn't been completed
-    if (delivery.status === DeliveryStatus.OUT_FOR_DELIVERY) {
+    if (delivery.status === DeliveryStatus.DELIVERED) {
       throw new ForbiddenException('Cannot delete a completed delivery');
     }
 
@@ -857,7 +905,7 @@ export class DeliveriesService {
       );
     }
 
-    if (!['confirmed', 'preparing'].includes(order.status)) {
+    if (!['confirmed', 'preparing', 'pending'].includes(order.status)) {
       throw new BadRequestException(
         `Order ${orderId} is not in a valid state for delivery creation (status: ${order.status})`,
       );
@@ -892,15 +940,44 @@ export class DeliveriesService {
     employeeId?: number,
     notes?: string,
   ): Promise<void> {
-    const estimatedTime = delivery.estimated_delivery_time || undefined;
+    // 🔥 NEW: Send notification to customer based on status
+    try {
+      if (delivery.order?.User_id) {
+        const statusMessages = {
+          [DeliveryStatus.PENDING]: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ກຳລັງດຳເນີນການ`,
+          [DeliveryStatus.PREPARING]: `ຮ້ານກຳລັງກະກຽມຄຳສັ່ງຊື້ #${delivery.order.order_id} ເພື່ອຈັດສົ່ງ`,
+          [DeliveryStatus.OUT_FOR_DELIVERY]: `ພະນັກງານຈັດສົ່ງກຳລັງນຳສົ່ງຄຳສັ່ງຊື້ #${delivery.order.order_id} ມາຫາທ່ານ`,
+          [DeliveryStatus.DELIVERED]: `ຄຳສັ່ງຊື້ #${delivery.order.order_id} ໄດ້ຖືກຈັດສົ່ງສຳເລັດແລ້ວ`,
+          [DeliveryStatus.CANCELLED]: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ຖືກຍົກເລີກ`,
+        };
 
-    // Send notification to customer
-    await this.createDeliveryNotification(
-      delivery.order_id,
-      newStatus,
-      estimatedTime,
-      notes,
-    );
+        const message =
+          statusMessages[newStatus] || `ອັບເດດການຈັດສົ່ງ: ${newStatus}`;
+        const finalMessage = notes ? `${message}. ${notes}` : message;
+
+        await this.customerNotificationsService.create({
+          user_id: delivery.order.User_id,
+          order_id: delivery.order_id,
+          message: finalMessage,
+          type: 'delivery_update',
+          action_url: `/orders/${delivery.order.order_id}`,
+        });
+      }
+
+      // Notify employees about status changes
+      await this.customerNotificationsService.create({
+        message: `ການຈັດສົ່ງ #${delivery.delivery_id} ປ່ຽນສະຖານະເປັນ: ${newStatus}`,
+        type: 'delivery_update',
+        order_id: delivery.order_id,
+        target_roles: ['admin', 'employee'],
+        action_url: `/admin/deliveries/${delivery.id}`,
+      });
+    } catch (notificationError) {
+      this.logger.error(
+        'Failed to send status change notifications:',
+        notificationError,
+      );
+    }
 
     // Create order timeline entry
     await this.prisma.orderTimeline.create({
@@ -949,6 +1026,28 @@ export class DeliveriesService {
       employeeId,
       notes || 'Order picked up from kitchen for delivery',
     );
+
+    // 🔥 NEW: Send specific notification for out for delivery
+    try {
+      if (delivery.order?.User_id) {
+        const employeeName = delivery.employee
+          ? `${delivery.employee.first_name || ''} ${delivery.employee.last_name || ''}`.trim()
+          : 'ພະນັກງານຈັດສົ່ງ';
+
+        await this.customerNotificationsService.create({
+          user_id: delivery.order.User_id,
+          order_id: delivery.order_id,
+          message: `${employeeName} ໄດ້ຮັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ແລ້ວ ແລະ ກຳລັງມາຫາທ່ານ`,
+          type: 'delivery_started',
+          action_url: `/orders/${delivery.order.order_id}/track`,
+        });
+      }
+    } catch (notificationError) {
+      this.logger.error(
+        'Failed to send out for delivery notification:',
+        notificationError,
+      );
+    }
   }
 
   private async handleDeliveryCompletion(
@@ -976,6 +1075,24 @@ export class DeliveriesService {
     if (delivery.order?.User_id) {
       await this.createOrderHistory(delivery);
     }
+
+    // 🔥 NEW: Send delivery completion notification
+    try {
+      if (delivery.order?.User_id) {
+        await this.customerNotificationsService.create({
+          user_id: delivery.order.User_id,
+          order_id: delivery.order_id,
+          message: `ຄຳສັ່ງຊື້ #${delivery.order.order_id} ໄດ້ຖືກຈັດສົ່ງສຳເລັດແລ້ວ! ຂອບໃຈທີ່ເລືອກໃຊ້ບໍລິການຂອງພວກເຮົາ`,
+          type: 'order_delivered',
+          action_url: `/orders/${delivery.order.order_id}`,
+        });
+      }
+    } catch (notificationError) {
+      this.logger.error(
+        'Failed to send delivery completion notification:',
+        notificationError,
+      );
+    }
   }
 
   private async handleDeliveryCancellation(
@@ -990,6 +1107,25 @@ export class DeliveriesService {
       employeeId,
       notes || 'Delivery cancelled',
     );
+
+    // 🔥 NEW: Send cancellation notification
+    try {
+      if (delivery.order?.User_id) {
+        const reason = notes ? `. ເຫດຜົນ: ${notes}` : '';
+        await this.customerNotificationsService.create({
+          user_id: delivery.order.User_id,
+          order_id: delivery.order_id,
+          message: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ຖືກຍົກເລີກ${reason}`,
+          type: 'order_cancelled',
+          action_url: `/orders/${delivery.order.order_id}`,
+        });
+      }
+    } catch (notificationError) {
+      this.logger.error(
+        'Failed to send cancellation notification:',
+        notificationError,
+      );
+    }
   }
 
   private async updateOrderStatus(
@@ -1048,102 +1184,6 @@ export class DeliveriesService {
     } catch (error) {
       this.logger.error(
         `Failed to create order history for order ${delivery.order_id}:`,
-        error,
-      );
-    }
-  }
-
-  private async createDeliveryNotification(
-    orderId: number,
-    status: DeliveryStatus,
-    estimatedTime?: Date,
-    customMessage?: string,
-  ): Promise<void> {
-    try {
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        select: {
-          User_id: true,
-          order_id: true,
-        },
-      });
-
-      if (!order?.User_id) {
-        this.logger.warn(
-          `No user found for order ${orderId}, skipping notification`,
-        );
-        return;
-      }
-
-      const message =
-        customMessage ||
-        this.generateStatusNotificationMessage(
-          order.order_id,
-          status,
-          estimatedTime,
-        );
-
-      const notificationPayload: DeliveryNotificationPayload = {
-        user_id: order.User_id,
-        order_id: orderId,
-        message,
-        type: 'delivery_update',
-        action_url: `/orders/${orderId}`,
-        read: false,
-      };
-
-      await this.notificationsService.create(notificationPayload);
-      this.logger.log(`Sent delivery notification for order ${orderId}`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to create delivery notification for order ${orderId}:`,
-        error,
-      );
-    }
-  }
-
-  private generateStatusNotificationMessage(
-    orderNumber: string,
-    status: DeliveryStatus,
-    estimatedTime?: Date,
-  ): string {
-    const statusMessages = {
-      [DeliveryStatus.PENDING]: `Your delivery order #${orderNumber} is being processed. We'll notify you when it's ready for delivery.`,
-      [DeliveryStatus.PREPARING]: `Your order #${orderNumber} is being prepared. It will be ready for delivery soon.`,
-      [DeliveryStatus.OUT_FOR_DELIVERY]: `Your order #${orderNumber} is on the way${estimatedTime ? ` and should arrive by ${estimatedTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : ''}.`,
-      [DeliveryStatus.DELIVERED]: `Your order #${orderNumber} has been delivered. Enjoy your meal!`,
-      [DeliveryStatus.CANCELLED]: `Your delivery for order #${orderNumber} has been cancelled. Please contact customer service for more information.`,
-    };
-
-    return (
-      statusMessages[status] ||
-      `Your delivery for order #${orderNumber} has been updated to status: ${status}`
-    );
-  }
-
-  private async notifyLocationUpdate(delivery: any): Promise<void> {
-    try {
-      const employeeName = delivery.employee
-        ? `${delivery.employee.first_name || ''} ${delivery.employee.last_name || ''}`.trim()
-        : 'The delivery person';
-
-      const message = `${employeeName} has updated their location for your order #${delivery.order.order_id}. You can track the delivery on the map.`;
-
-      await this.notificationsService.create({
-        user_id: delivery.order.user?.id || 0,
-        order_id: delivery.order_id,
-        message,
-        type: 'location_update',
-        action_url: `/orders/${delivery.order_id}/track`,
-        read: false,
-      });
-
-      this.logger.log(
-        `Sent location update notification for delivery ${delivery.id}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to send location notification for delivery ${delivery.id}:`,
         error,
       );
     }

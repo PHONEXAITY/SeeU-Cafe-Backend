@@ -5,6 +5,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomerNotificationsService } from '../customer-notifications/customer-notifications.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { UpdateTimeDto } from './dto/update-time.dto';
@@ -52,6 +53,7 @@ export class OrdersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly customerNotificationsService: CustomerNotificationsService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {
     this.redisClient = new Redis({
@@ -61,6 +63,7 @@ export class OrdersService {
   }
 
   async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
+    // Validation logic (existing code)
     if (createOrderDto.User_id) {
       const user = await this.prisma.user.findUnique({
         where: { id: createOrderDto.User_id },
@@ -106,7 +109,6 @@ export class OrdersService {
     }
 
     const { order_details, ...orderData } = createOrderDto;
-
     const uniqueOrderId = `ORD${Date.now()}`;
 
     let estimatedReadyTime: Date | undefined = undefined;
@@ -153,6 +155,7 @@ export class OrdersService {
       data: orderCreateInput,
     });
 
+    // Create order details
     if (order_details && order_details.length > 0) {
       await Promise.all(
         order_details.map(async (detail) => {
@@ -207,6 +210,7 @@ export class OrdersService {
       );
     }
 
+    // Create delivery if needed
     if (orderData.order_type === 'delivery' && orderData.delivery) {
       const deliveryCreateInput: Prisma.DeliveryCreateInput = {
         order: { connect: { id: order.id } },
@@ -229,6 +233,43 @@ export class OrdersService {
       await this.prisma.delivery.create({
         data: deliveryCreateInput,
       });
+    }
+
+    // 🔥 NEW: Send order creation notification
+    try {
+      const createdOrder = await this.findOne(order.id);
+
+      // Notify customer about order creation
+      if (createdOrder.user?.id) {
+        await this.customerNotificationsService.createOrderStatusNotification(
+          createdOrder,
+          'confirmed',
+          estimatedReadyTime
+            ? `ເວລາເຄື່ອງໄວ້ປະມານ: ${estimatedReadyTime.toLocaleTimeString(
+                'lo-LA',
+                {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                },
+              )}`
+            : undefined,
+        );
+      }
+
+      // Notify employees about new order
+      await this.customerNotificationsService.create({
+        message: `ມີຄຳສັ່ງຊື້ໃໝ່ #${uniqueOrderId} (${orderData.order_type})`,
+        type: 'new_order',
+        order_id: order.id,
+        target_roles: ['admin', 'employee'],
+        action_url: `/admin/orders/${order.id}`,
+      });
+    } catch (notificationError) {
+      console.error(
+        'Failed to send order creation notifications:',
+        notificationError,
+      );
+      // Don't fail the order creation if notification fails
     }
 
     const result = await this.findOne(order.id);
@@ -416,7 +457,8 @@ export class OrdersService {
     id: number,
     updateOrderDto: UpdateOrderDto,
   ): Promise<OrderWithRelations> {
-    await this.findOne(id);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const existingOrder = await this.findOne(id);
 
     if (updateOrderDto.User_id) {
       const user = await this.prisma.user.findUnique({
@@ -497,6 +539,7 @@ export class OrdersService {
       data: orderUpdateInput,
     });
 
+    // Update order details
     if (order_details && order_details.length > 0) {
       await Promise.all(
         order_details.map(async (detail) => {
@@ -564,6 +607,7 @@ export class OrdersService {
       });
     }
 
+    // Handle delivery status updates
     if (orderData.order_type === 'delivery' && status === 'in_delivery') {
       await this.prisma.delivery.update({
         where: { order_id: id },
@@ -582,6 +626,37 @@ export class OrdersService {
           actual_delivery_time: new Date(),
         },
       });
+    }
+
+    // 🔥 NEW: Send status update notification
+    try {
+      const updatedOrder = await this.findOne(id);
+
+      // Send notification to customer
+      if (updatedOrder.user?.id) {
+        await this.customerNotificationsService.createOrderStatusNotification(
+          updatedOrder,
+          status,
+          notes,
+        );
+      }
+
+      // Send notification to employees for important status changes
+      if (['ready', 'completed', 'cancelled'].includes(status)) {
+        await this.customerNotificationsService.create({
+          message: `ຄຳສັ່ງຊື້ #${updatedOrder.order_id} ປ່ຽນສະຖານະເປັນ: ${status}`,
+          type: 'order_update',
+          order_id: id,
+          target_roles: ['admin', 'employee'],
+          action_url: `/admin/orders/${id}`,
+        });
+      }
+    } catch (notificationError) {
+      console.error(
+        'Failed to send status update notifications:',
+        notificationError,
+      );
+      // Don't fail the status update if notification fails
     }
 
     await this.cacheManager.del(`order:${id}`);
@@ -642,18 +717,41 @@ export class OrdersService {
       },
     });
 
-    if (updateTimeDto.notifyCustomer && orderData.User_id) {
-      await this.prisma.customerNotification.create({
-        data: {
-          user_id: orderData.User_id,
+    // 🔥 NEW: Send time update notification
+    try {
+      const updatedOrder = await this.findOne(id);
+
+      if (
+        updateTimeDto.notifyCustomer &&
+        updatedOrder.user?.id &&
+        previousTime
+      ) {
+        await this.customerNotificationsService.createOrderTimeChangeNotification(
+          updatedOrder,
+          previousTime,
+          updateTimeDto.newTime,
+          updateTimeDto.reason,
+        );
+      }
+
+      // Also create a general notification
+      if (updateTimeDto.notifyCustomer && updatedOrder.User_id) {
+        await this.customerNotificationsService.create({
+          user_id: updatedOrder.User_id,
           order_id: id,
           message:
             updateTimeDto.notificationMessage ||
-            `Your order time has been updated. New estimated time: ${updateTimeDto.newTime.toLocaleString()}`,
+            `ເວລາຄຳສັ່ງຊື້ #${updatedOrder.order_id} ມີການປ່ຽນແປງ. ເວລາໃໝ່: ${updateTimeDto.newTime.toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}`,
           type: 'time_change',
-          action_url: `/orders/${orderData.order_id}`,
-        },
-      });
+          action_url: `/orders/${updatedOrder.order_id}`,
+        });
+      }
+    } catch (notificationError) {
+      console.error(
+        'Failed to send time update notifications:',
+        notificationError,
+      );
+      // Don't fail the time update if notification fails
     }
 
     await this.cacheManager.del(`order:${id}`);
@@ -730,6 +828,21 @@ export class OrdersService {
           notes: 'All items are ready',
         },
       });
+
+      // 🔥 NEW: Send ready notification
+      try {
+        const updatedOrder = await this.findOne(orderId);
+
+        if (updatedOrder.user?.id) {
+          await this.customerNotificationsService.createOrderStatusNotification(
+            updatedOrder,
+            'ready',
+            'ເມນູທັງໝົດພ້ອມແລ້ວ',
+          );
+        }
+      } catch (notificationError) {
+        console.error('Failed to send ready notification:', notificationError);
+      }
     }
 
     await this.cacheManager.del(`order:${orderId}`);
@@ -754,16 +867,22 @@ export class OrdersService {
       data: { pickup_code: pickupCode },
     });
 
-    if (orderData.User_id) {
-      await this.prisma.customerNotification.create({
-        data: {
+    // 🔥 NEW: Send pickup code notification
+    try {
+      if (orderData.User_id) {
+        await this.customerNotificationsService.create({
           user_id: orderData.User_id,
           order_id: id,
-          message: `Your order is ready for pickup. Your pickup code is: ${pickupCode}`,
+          message: `ຄຳສັ່ງຊື້ #${orderData.order_id} ພ້ອມໃຫ້ມາຮັບແລ້ວ. ລະຫັດຮັບເອົາ: ${pickupCode}`,
           type: 'pickup_ready',
           action_url: `/orders/${orderData.order_id}`,
-        },
-      });
+        });
+      }
+    } catch (notificationError) {
+      console.error(
+        'Failed to send pickup code notification:',
+        notificationError,
+      );
     }
 
     await this.cacheManager.del(`order:${id}`);
