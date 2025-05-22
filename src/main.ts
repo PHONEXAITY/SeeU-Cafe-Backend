@@ -53,6 +53,11 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
+  // 🔥 NEW: Serve email templates directory
+  app.useStaticAssets(join(__dirname, '..', 'templates'), {
+    prefix: '/templates/',
+  });
+
   app.use((req, res, next) => {
     if (req.url.startsWith('/uploads/')) {
       res.header('Cross-Origin-Resource-Policy', 'cross-origin');

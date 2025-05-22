@@ -26,6 +26,7 @@ import { SettingsModule } from './settings/settings.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CustomerNotificationsModule } from './customer-notifications/customer-notifications.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
+import { EmailModule } from './email/email.module';
 import { SessionModule } from './session/session.module';
 import { UserActivityMiddleware } from './session/user-activity.middleware';
 import { CartModule } from './cart/cart.module';
@@ -75,6 +76,7 @@ import { CartModule } from './cart/cart.module';
     CartModule,
     CustomerNotificationsModule,
     PushNotificationsModule,
+    EmailModule,
     PaymentsModule,
     PromotionsModule,
     EmployeesModule,
