@@ -609,6 +609,7 @@ export class DeliveriesController {
     },
   ) {
     const deliveryInfo =
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       await this.deliveriesService.calculateDeliveryFeeForLocation(
         locationDto.customer_latitude,
         locationDto.customer_longitude,
