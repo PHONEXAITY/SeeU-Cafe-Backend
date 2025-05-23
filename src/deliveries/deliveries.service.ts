@@ -55,6 +55,66 @@ export class DeliveriesService {
     private readonly customerNotificationsService: CustomerNotificationsService,
   ) {}
 
+  private calculateDeliveryDistance(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ) {
+    const R = 6371e3; // รัศมีโลกเป็นเมตร
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    const distance = R * c; // in meters
+
+    // Simple estimation: 1 minute per 100 meters + 10 minutes base
+    const estimatedTime = 10 + distance / 100;
+
+    // Simple fee calculation: 5000 LAK base + 1000 LAK per 500 meters
+    const deliveryFee = 5000 + Math.ceil(distance / 500) * 1000;
+
+    return {
+      distance,
+      estimatedTime,
+      deliveryFee,
+    };
+  }
+
+  public calculateDeliveryFeeForLocation(
+    customerLat: number,
+    customerLng: number,
+    restaurantLat: number = 19.922828240529658,
+    restaurantLng: number = 102.1863694746581,
+  ) {
+    const deliveryInfo = this.calculateDeliveryDistance(
+      restaurantLat,
+      restaurantLng,
+      customerLat,
+      customerLng,
+    );
+
+    return {
+      distance: deliveryInfo.distance,
+      estimatedTime: deliveryInfo.estimatedTime,
+      deliveryFee: deliveryInfo.deliveryFee,
+      isWithinDeliveryArea: this.isLocationWithinDeliveryArea(
+        customerLat,
+        customerLng,
+      ),
+    };
+  }
+
+  private isLocationWithinDeliveryArea(lat: number, lng: number): boolean {
+    // Implement your delivery area check logic here
+    return lat >= 19.85 && lat <= 19.92 && lng >= 102.1 && lng <= 102.18;
+  }
   /**
    * Create a new delivery
    */
@@ -65,6 +125,30 @@ export class DeliveriesService {
 
     // Validate order exists and is eligible for delivery
     await this.validateOrderForDelivery(createDeliveryDto.order_id);
+
+    // 🔥 Validate customer location (ตรวจสอบพิกัดลูกค้า)
+    // eslint-disable-next-line @typescript-eslint/await-thenable
+    const locationValidation = await this.validateCustomerLocation(
+      createDeliveryDto.customer_latitude,
+      createDeliveryDto.customer_longitude,
+    );
+
+    if (!locationValidation.isValid) {
+      throw new BadRequestException(locationValidation.message);
+    }
+
+    // 🔥 Calculate delivery fee based on distance
+    const restaurantLocation = { lat: 19.8845, lng: 102.135 }; // ตำแหน่งร้าน
+    const deliveryInfo = this.calculateDeliveryDistance(
+      restaurantLocation.lat,
+      restaurantLocation.lng,
+      createDeliveryDto.customer_latitude,
+      createDeliveryDto.customer_longitude,
+    );
+
+    // ใช้ค่าจัดส่งที่คำนวณได้ หรือที่ระบุมา
+    const finalDeliveryFee =
+      createDeliveryDto.delivery_fee || deliveryInfo.deliveryFee;
 
     // Validate employee if provided
     if (createDeliveryDto.employee_id) {
@@ -85,20 +169,30 @@ export class DeliveriesService {
     // Generate unique delivery ID
     const deliveryId = BigInt(Date.now());
 
-    // Set default estimated delivery time if not provided (1 hour from now)
+    // Set default estimated delivery time based on distance
     const estimatedDeliveryTime = createDeliveryDto.estimated_delivery_time
       ? new Date(createDeliveryDto.estimated_delivery_time)
-      : new Date(Date.now() + 60 * 60 * 1000);
+      : new Date(Date.now() + deliveryInfo.estimatedTime * 60 * 1000);
 
     const status = createDeliveryDto.status ?? DeliveryStatus.PENDING;
 
     try {
       const delivery = await this.prisma.delivery.create({
         data: {
-          ...createDeliveryDto,
+          order_id: createDeliveryDto.order_id,
           delivery_id: deliveryId,
-          estimated_delivery_time: estimatedDeliveryTime,
           status,
+          delivery_address: createDeliveryDto.delivery_address,
+
+          // 🔥 เก็บพิกัดลูกค้า
+          customer_latitude: createDeliveryDto.customer_latitude,
+          customer_longitude: createDeliveryDto.customer_longitude,
+          customer_location_note: createDeliveryDto.customer_location_note,
+
+          employee_id: createDeliveryDto.employee_id,
+          estimated_delivery_time: estimatedDeliveryTime,
+          delivery_fee: finalDeliveryFee,
+          customer_note: createDeliveryDto.customer_note,
         },
         include: {
           order: {
@@ -124,7 +218,6 @@ export class DeliveriesService {
           },
         },
       });
-
       // Update order status to reflect delivery creation
       if (status === DeliveryStatus.OUT_FOR_DELIVERY) {
         await this.updateOrderStatus(
@@ -136,25 +229,25 @@ export class DeliveriesService {
       }
 
       // 🔥 NEW: Send delivery creation notification
+      // 🔥 ส่งการแจ้งเตือนพร้อมข้อมูลระยะทาง
       try {
         if (delivery.order.user?.id) {
+          const distanceText = `${(deliveryInfo.distance / 1000).toFixed(1)} ກມ.`;
+          const feeText = `${finalDeliveryFee.toLocaleString()} LAK`;
+          const timeText = estimatedDeliveryTime.toLocaleTimeString('lo-LA', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+
           await this.customerNotificationsService.create({
             user_id: delivery.order.user.id,
             order_id: delivery.order_id,
-            message: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ໄດ້ຖືກສ້າງແລ້ວ. ເວລາຄາດຄະເນ: ${estimatedDeliveryTime.toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}`,
+            message: `ການຈັດສົ່ງສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id} ໄດ້ຖືກສ້າງແລ້ວ
+ໄລຍະທາງ: ${distanceText} | ຄ່າສົ່ງ: ${feeText} | ເວລາຄາດຄະເນ: ${timeText}`,
             type: 'delivery_update',
-            action_url: `/orders/${delivery.order.order_id}`,
+            action_url: `/orders/${delivery.order.order_id}/track`,
           });
         }
-
-        // Notify employees about new delivery
-        await this.customerNotificationsService.create({
-          message: `ມີການຈັດສົ່ງໃໝ່ສຳລັບຄຳສັ່ງຊື້ #${delivery.order.order_id}`,
-          type: 'delivery_update',
-          order_id: delivery.order_id,
-          target_roles: ['admin', 'employee'],
-          action_url: `/admin/deliveries/${delivery.id}`,
-        });
       } catch (notificationError) {
         this.logger.error(
           'Failed to send delivery creation notifications:',
@@ -180,6 +273,42 @@ export class DeliveriesService {
         `Failed to create delivery: ${error.message}`,
       );
     }
+  }
+
+  private validateCustomerLocation(
+    latitude: number,
+    longitude: number,
+  ): { isValid: boolean; message: string } {
+    // ตรวจสอบขอบเขตพื้นฐาน
+    if (latitude < -90 || latitude > 90) {
+      return {
+        isValid: false,
+        message: 'Latitude ຕ້ອງຢູ່ລະຫວ່າງ -90 ຫາ 90',
+      };
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      return {
+        isValid: false,
+        message: 'Longitude ຕ້ອງຢູ່ລະຫວ່າງ -180 ຫາ 180',
+      };
+    }
+
+    // ตรวจสอบว่าอยู่ในพื้นที่หลวงพระบางหรือไม่
+    const isInLuangPrabang =
+      latitude >= 19.85 &&
+      latitude <= 19.92 &&
+      longitude >= 102.1 &&
+      longitude <= 102.18;
+
+    if (!isInLuangPrabang) {
+      return {
+        isValid: false,
+        message: 'ຕຳແໜ່ງນີ້ຢູ່ນອກເຂດການບໍລິການຂອງຫຼວງພະບາງ',
+      };
+    }
+
+    return { isValid: true, message: 'Valid location' };
   }
 
   /**
@@ -748,11 +877,14 @@ export class DeliveriesService {
       return {
         id: updatedDelivery.id,
         order_id: updatedDelivery.order_id,
+        customer_latitude: updatedDelivery.customer_latitude,
+        customer_longitude: updatedDelivery.customer_longitude,
+        customer_location_note: updatedDelivery.customer_location_note,
+        delivery_address: updatedDelivery.delivery_address,
         latitude: updatedDelivery.last_latitude,
         longitude: updatedDelivery.last_longitude,
         lastUpdate: updatedDelivery.last_location_update,
         status: updatedDelivery.status,
-        delivery_address: updatedDelivery.delivery_address,
         employee: updatedDelivery.employee,
         order: {
           order_id: updatedDelivery.order.order_id,
@@ -777,11 +909,19 @@ export class DeliveriesService {
       select: {
         id: true,
         order_id: true,
+
+        // พิกัดลูกค้า (จุดปลายทาง)
+        customer_latitude: true,
+        customer_longitude: true,
+        customer_location_note: true,
+        delivery_address: true,
+
+        // พิกัดปัจจุบันของพนักงาน
         last_latitude: true,
         last_longitude: true,
         last_location_update: true,
+
         status: true,
-        delivery_address: true,
         employee: {
           select: {
             id: true,
@@ -813,11 +953,19 @@ export class DeliveriesService {
     return {
       id: delivery.id,
       order_id: delivery.order_id,
+
+      // ข้อมูลตำแหน่งลูกค้า (จุดปลายทาง)
+      customer_latitude: delivery.customer_latitude,
+      customer_longitude: delivery.customer_longitude,
+      customer_location_note: delivery.customer_location_note,
+      delivery_address: delivery.delivery_address,
+
+      // ตำแหน่งปัจจุบันของพนักงานจัดส่ง
       latitude: delivery.last_latitude,
       longitude: delivery.last_longitude,
       lastUpdate: delivery.last_location_update,
+
       status: delivery.status,
-      delivery_address: delivery.delivery_address,
       employee: delivery.employee,
       order: delivery.order,
     };

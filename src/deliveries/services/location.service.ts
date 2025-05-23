@@ -361,7 +361,7 @@ export class LocationService {
 
     const distanceKm = distance / 1000;
     // eslint-disable-next-line prefer-const
-    let baseFee = 6000; // 15,000 LAK เริ่มต้น
+    let baseFee = 5000; // 15,000 LAK เริ่มต้น
 
     // ค่าธรรมเนียมตามระยะทาง
     if (distanceKm <= 3) {

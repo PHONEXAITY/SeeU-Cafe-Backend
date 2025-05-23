@@ -9,6 +9,7 @@ import {
   IsNumber,
   MinLength,
   Min,
+  Max,
   Matches,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
@@ -46,6 +47,43 @@ export class CreateDeliveryDto {
   })
   @Transform(({ value }: { value: string }) => value?.trim())
   delivery_address: string;
+
+  // 🔥 เพิ่มฟิลด์พิกัดลูกค้า
+  @ApiProperty({
+    description: 'Customer latitude coordinate',
+    example: 19.8845,
+    minimum: -90,
+    maximum: 90,
+  })
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(-90, { message: 'Latitude must be between -90 and 90' })
+  @Max(90, { message: 'Latitude must be between -90 and 90' })
+  @Type(() => Number)
+  customer_latitude: number;
+
+  @ApiProperty({
+    description: 'Customer longitude coordinate',
+    example: 102.135,
+    minimum: -180,
+    maximum: 180,
+  })
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(-180, { message: 'Longitude must be between -180 and 180' })
+  @Max(180, { message: 'Longitude must be between -180 and 180' })
+  @Type(() => Number)
+  customer_longitude: number;
+
+  @ApiPropertyOptional({
+    description: 'Additional location note for customer address',
+    example: 'ຢູ່ຂ້າງວັດຊຽງທອງ, ອາຄານສີຟ້າ ຊັ້ນ 2',
+    maxLength: 200,
+  })
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }: { value: string }) => (value ? value.trim() : value))
+  customer_location_note?: string;
 
   @ApiPropertyOptional({
     description: 'Customer contact phone number',

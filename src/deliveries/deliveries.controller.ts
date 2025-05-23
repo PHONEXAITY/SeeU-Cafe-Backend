@@ -47,6 +47,9 @@ class DeliveryResponseDto {
   status: DeliveryStatus;
   delivery_id: string;
   delivery_address: string;
+  customer_latitude?: number;
+  customer_longitude?: number;
+  customer_location_note?: string;
   phone_number?: string;
   employee_id?: number;
   delivery_fee?: number;
@@ -564,6 +567,60 @@ export class DeliveriesController {
       period: `Last ${days} days`,
       avgDeliveryTime: null,
       onTimeDeliveryRate: null,
+    };
+  }
+  @Post('calculate-fee')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Calculate delivery fee',
+    description: 'Calculate delivery fee based on customer location',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        customer_latitude: { type: 'number', example: 19.8845 },
+        customer_longitude: { type: 'number', example: 102.135 },
+      },
+      required: ['customer_latitude', 'customer_longitude'],
+    },
+  })
+  @Post('calculate-fee')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Calculate delivery fee',
+    description: 'Calculate delivery fee based on customer location',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        customer_latitude: { type: 'number', example: 19.8845 },
+        customer_longitude: { type: 'number', example: 102.135 },
+      },
+      required: ['customer_latitude', 'customer_longitude'],
+    },
+  })
+  async calculateDeliveryFee(
+    @Body()
+    locationDto: {
+      customer_latitude: number;
+      customer_longitude: number;
+    },
+  ) {
+    const deliveryInfo =
+      await this.deliveriesService.calculateDeliveryFeeForLocation(
+        locationDto.customer_latitude,
+        locationDto.customer_longitude,
+      );
+
+    return {
+      distance_meters: deliveryInfo.distance,
+      distance_km: (deliveryInfo.distance / 1000).toFixed(1),
+      estimated_time_minutes: deliveryInfo.estimatedTime,
+      delivery_fee_lak: deliveryInfo.deliveryFee,
+      is_within_delivery_area: deliveryInfo.isWithinDeliveryArea,
+      formatted_fee: `${deliveryInfo.deliveryFee.toLocaleString()} LAK`,
     };
   }
 }

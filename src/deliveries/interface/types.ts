@@ -11,6 +11,9 @@ export interface LocationHistoryEntry {
 export interface DeliveryLocationInfo {
   id: number;
   order_id: number;
+  customer_latitude: number | null;
+  customer_longitude: number | null;
+  customer_location_note: string | null;
   latitude: number | null;
   longitude: number | null;
   lastUpdate: Date | null;

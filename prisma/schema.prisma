@@ -144,6 +144,10 @@ model Delivery {
   status                   String    @default("pending")
   delivery_id              BigInt    @unique
   delivery_address         String?
+    // 🔥 เพิ่มพิกัดจุดปลายทาง (ลูกค้า)
+  customer_latitude        Float?    // พิกัด latitude ของลูกค้า
+  customer_longitude       Float?    // พิกัด longitude ของลูกค้า
+  customer_location_note   String?   // หมายเหตุตำแหน่งของลูกค้า
   carrier_id               Int?
   employee_id              Int?
   actual_delivery_time     DateTime?
