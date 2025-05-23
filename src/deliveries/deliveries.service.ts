@@ -10,10 +10,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerNotificationsService } from '../customer-notifications/customer-notifications.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
+import { LocationService } from './services/location.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { EnhancedUpdateLocationDto } from './dto/enhanced-update-location.dto';
 import { QueryDeliveryDto } from './dto/query-delivery.dto';
 import { DeliveryStatus, DeliveryTimeType } from './enums/delivery-status.enum';
 import { Prisma, Delivery } from '@prisma/client';
@@ -25,7 +27,7 @@ import {
 
 @Injectable()
 export class DeliveriesService {
-  private readonly logger = new Logger(DeliveriesService.name);
+  protected readonly logger = new Logger(DeliveriesService.name);
 
   // Define valid status transitions based on business logic
   private readonly validStatusTransitions: Record<
@@ -1204,5 +1206,103 @@ export class DeliveriesService {
       );
       return [];
     }
+  }
+}
+export class EnhancedDeliveriesService extends DeliveriesService {
+  constructor(
+    prisma: PrismaService,
+    customerNotificationsService: CustomerNotificationsService,
+    private readonly locationService: LocationService,
+  ) {
+    super(prisma, customerNotificationsService);
+  }
+  /**
+   * Enhanced location update with GPS validation
+   */
+  async updateLocationWithValidation(
+    id: number,
+    updateLocationDto: EnhancedUpdateLocationDto,
+  ): Promise<DeliveryLocationInfo> {
+    try {
+      // Validate GPS accuracy
+      const gpsValidation = this.locationService.validateGPSAccuracy(
+        updateLocationDto.latitude,
+        updateLocationDto.longitude,
+        updateLocationDto.gpsAccuracy,
+      );
+
+      // If GPS is not accurate and not forced, suggest better location
+      if (!gpsValidation.isAccurate && !updateLocationDto.forceUpdate) {
+        const suggestions = this.locationService.suggestBetterLocation(
+          updateLocationDto.latitude,
+          updateLocationDto.longitude,
+        );
+
+        throw new BadRequestException({
+          message: 'GPS ບໍ່ແມ່ນຢຳພໍ',
+          gpsValidation,
+          suggestions,
+          canForceUpdate: true,
+        });
+      }
+
+      // Adjust location for poor GPS areas
+      const locationAdjustment = this.locationService.adjustLocationForPoorGPS(
+        updateLocationDto.latitude,
+        updateLocationDto.longitude,
+        updateLocationDto.locationNote,
+      );
+
+      // Use adjusted location if needed
+      const finalLocation = locationAdjustment.adjustedLocation;
+
+      // Call parent method with adjusted coordinates
+      const result = await super.updateLocation(id, {
+        ...updateLocationDto,
+        latitude: finalLocation.latitude,
+        longitude: finalLocation.longitude,
+        locationNote:
+          updateLocationDto.locationNote +
+          (locationAdjustment.reason !== 'ຕຳແໜ່ງ GPS ມີຄວາມແມ່ນຢຳດີ'
+            ? ` (${locationAdjustment.reason})`
+            : ''),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      return {
+        ...result,
+        gpsValidation,
+        locationAdjustment,
+      } as any;
+    } catch (error) {
+      this.logger.error(`GPS validation failed for delivery ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate delivery fee based on distance
+   */
+  calculateDeliveryFeeForOrder(
+    restaurantLat: number = 19.8845,
+    restaurantLng: number = 102.135,
+    customerLat: number,
+    customerLng: number,
+  ) {
+    const distanceInfo = this.locationService.calculateDeliveryDistance(
+      restaurantLat,
+      restaurantLng,
+      customerLat,
+      customerLng,
+    );
+
+    return {
+      distance: distanceInfo.distance,
+      estimatedTime: distanceInfo.estimatedTime,
+      deliveryFee: distanceInfo.deliveryFee,
+      isWithinDeliveryArea: distanceInfo.isWithinDeliveryArea,
+      formattedDistance: `${(distanceInfo.distance / 1000).toFixed(1)} ກມ.`,
+      formattedFee: `${distanceInfo.deliveryFee.toLocaleString()} LAK`,
+    };
   }
 }
