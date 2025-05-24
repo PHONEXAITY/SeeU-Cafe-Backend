@@ -113,7 +113,7 @@ export class DeliveriesService {
 
   private isLocationWithinDeliveryArea(lat: number, lng: number): boolean {
     // Implement your delivery area check logic here
-    return lat >= 19.85 && lat <= 19.92 && lng >= 102.1 && lng <= 102.18;
+    return lat >= 19.8 && lat <= 19.95 && lng >= 102 && lng <= 102.25;
   }
   /**
    * Create a new delivery
@@ -121,6 +121,13 @@ export class DeliveriesService {
   async create(createDeliveryDto: CreateDeliveryDto): Promise<Delivery> {
     this.logger.log(
       `Creating delivery for order ${createDeliveryDto.order_id}`,
+    );
+
+    // Log coordinates for debugging
+    this.logLocationDebug(
+      createDeliveryDto.customer_latitude,
+      createDeliveryDto.customer_longitude,
+      'Delivery Creation',
     );
 
     // Validate order exists and is eligible for delivery
@@ -134,6 +141,14 @@ export class DeliveriesService {
     );
 
     if (!locationValidation.isValid) {
+      this.logger.error(
+        `Location validation failed: ${locationValidation.message}`,
+        {
+          latitude: createDeliveryDto.customer_latitude,
+          longitude: createDeliveryDto.customer_longitude,
+          address: createDeliveryDto.delivery_address,
+        },
+      );
       throw new BadRequestException(locationValidation.message);
     }
 
@@ -296,19 +311,42 @@ export class DeliveriesService {
 
     // ตรวจสอบว่าอยู่ในพื้นที่หลวงพระบางหรือไม่
     const isInLuangPrabang =
-      latitude >= 19.85 &&
-      latitude <= 19.92 &&
-      longitude >= 102.1 &&
-      longitude <= 102.18;
+      latitude >= 19.8 &&
+      latitude <= 19.95 &&
+      longitude >= 102 &&
+      longitude <= 102.25;
 
     if (!isInLuangPrabang) {
+      this.logger.warn(
+        `Location outside service area: lat=${latitude}, lng=${longitude}`,
+      );
       return {
         isValid: false,
         message: 'ຕຳແໜ່ງນີ້ຢູ່ນອກເຂດການບໍລິການຂອງຫຼວງພະບາງ',
       };
     }
-
+    this.logger.log(
+      `Location validation passed: lat=${latitude}, lng=${longitude}`,
+    );
     return { isValid: true, message: 'Valid location' };
+  }
+
+  private logLocationDebug(
+    latitude: number,
+    longitude: number,
+    context: string,
+  ): void {
+    this.logger.log(`${context} - Location Debug:`, {
+      latitude: latitude,
+      longitude: longitude,
+      inServiceArea: this.isLocationWithinDeliveryArea(latitude, longitude),
+      bounds: {
+        minLat: 19.8,
+        maxLat: 19.95,
+        minLng: 102.05,
+        maxLng: 102.25,
+      },
+    });
   }
 
   /**

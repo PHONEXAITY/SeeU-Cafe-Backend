@@ -40,31 +40,31 @@ export class LocationService {
     {
       name: 'เขตตัวเมืองหลวงพระบาง',
       bounds: {
-        north: 19.9,
-        south: 19.87,
-        east: 102.15,
-        west: 102.12,
+        north: 19.95, // เปลี่ยนจาก 19.9
+        south: 19.8, // เปลี่ยนจาก 19.87
+        east: 102.25, // เปลี่ยนจาก 102.15
+        west: 102.05, // เปลี่ยนจาก 102.12
       },
       centerPoint: {
         latitude: 19.8845,
         longitude: 102.135,
       },
-      maxDeliveryRadius: 8, // 8km รัศมี
+      maxDeliveryRadius: 15, // 8km รัศมี
       gpsReliability: 'high',
     },
     {
       name: 'พื้นที่รอบเมือง',
       bounds: {
-        north: 19.92,
-        south: 19.85,
-        east: 102.18,
-        west: 102.1,
+        north: 19.98, // เปลี่ยนจาก 19.92
+        south: 19.75, // เปลี่ยนจาก 19.85
+        east: 102.3, // เปลี่ยนจาก 102.18
+        west: 102.0, // เปลี่ยนจาก 102.1
       },
       centerPoint: {
         latitude: 19.885,
         longitude: 102.14,
       },
-      maxDeliveryRadius: 15, // 15km รัศมี
+      maxDeliveryRadius: 25, // 15km รัศมี
       gpsReliability: 'medium',
     },
   ];
@@ -109,8 +109,17 @@ export class LocationService {
     const isInLuangPrabang = this.isInLuangPrabangArea(latitude, longitude);
 
     if (!isInLuangPrabang) {
+      console.log(
+        `Location validation failed: lat=${latitude}, lng=${longitude}`,
+      );
+      console.log('Service area bounds:', {
+        minLat: 19.8,
+        maxLat: 19.95,
+        minLng: 102.05,
+        maxLng: 102.25,
+      });
       throw new BadRequestException(
-        'ตำแหน่งนี้อยู่นอกพื้นที่จัดส่งของหลวงพระบาง',
+        `ตำแหน่งนี้อยู่นอกพื้นที่จัดส่งของหลวงพระบาง (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
       );
     }
 
@@ -152,11 +161,18 @@ export class LocationService {
     const isWithinDeliveryArea = deliveryArea !== null;
 
     // คำนวณเวลาโดยประมาณ (15 กม./ชม. สำหรับในเมือง, 25 กม./ชม. สำหรับนอกเมือง)
-    const avgSpeed = deliveryArea?.name.includes('ตัวเมือง') ? 15 : 25; // km/h
-    const estimatedTime = Math.ceil((distance / 1000 / avgSpeed) * 60); // นาที
+    const avgSpeed = deliveryArea?.name.includes('ตัวเมือง') ? 20 : 30; // km/h เพิ่มขึ้น
+    const baseTime = 15; // เพิ่มเวลาฐานเป็น 15 นาที
+    const estimatedTime = Math.ceil(
+      baseTime + (distance / 1000 / avgSpeed) * 60,
+    ); // นาที
 
     // คำนวณค่าจัดส่ง
     const deliveryFee = this.calculateDeliveryFee(distance, deliveryArea);
+
+    console.log(
+      `Distance calculation: ${distance}m, ${estimatedTime}min, ${deliveryFee} LAK`,
+    );
 
     return {
       distance: Math.round(distance),
@@ -268,20 +284,20 @@ export class LocationService {
   ): 'urban' | 'rural' | 'mountain' | 'unknown' {
     // พื้นที่ใจกลางเมือง
     if (
-      latitude >= 19.88 &&
-      latitude <= 19.89 &&
-      longitude >= 102.13 &&
-      longitude <= 102.145
+      latitude >= 19.82 && // เปลี่ยนจาก 19.88
+      latitude <= 19.92 && // เปลี่ยนจาก 19.89
+      longitude >= 102.1 && // เปลี่ยนจาก 102.13
+      longitude <= 102.18 // เปลี่ยนจาก 102.145
     ) {
       return 'urban';
     }
 
     // พื้นที่ภูเขา (ทางเหนือและทางใต้ของเมือง)
     if (
-      latitude < 19.87 ||
-      latitude > 19.9 ||
-      longitude < 102.11 ||
-      longitude > 102.16
+      latitude < 19.78 || // เปลี่ยนจาก 19.87
+      latitude > 19.98 || // เปลี่ยนจาก 19.9
+      longitude < 102.02 || // เปลี่ยนจาก 102.11
+      longitude > 102.28 // เปลี่ยนจาก 102.16
     ) {
       return 'mountain';
     }
@@ -361,17 +377,21 @@ export class LocationService {
 
     const distanceKm = distance / 1000;
     // eslint-disable-next-line prefer-const
-    let baseFee = 5000; // 15,000 LAK เริ่มต้น
+    let baseFee = 6000; // 15,000 LAK เริ่มต้น
 
     // ค่าธรรมเนียมตามระยะทาง
     if (distanceKm <= 3) {
       return baseFee;
     } else if (distanceKm <= 6) {
-      return baseFee + 5000; // เพิ่ม 5,000 LAK
-    } else if (distanceKm <= 10) {
-      return baseFee + 10000; // เพิ่ม 10,000 LAK
+      return baseFee + 3000; // เพิ่ม 3,000 LAK (ลดจาก 5,000)
+    } else if (distanceKm <= 12) {
+      // เพิ่มขึ้นจาก 10km
+      return baseFee + 8000; // เพิ่ม 8,000 LAK (ลดจาก 10,000)
+    } else if (distanceKm <= 20) {
+      // เพิ่มระยะทางสูงสุด
+      return baseFee + 12000; // เพิ่ม 12,000 LAK
     } else {
-      return baseFee + 15000; // เพิ่ม 15,000 LAK
+      return baseFee + 18000; // เพิ่ม 18,000 LAK สำหรับระยะไกลมาก
     }
   }
 }
