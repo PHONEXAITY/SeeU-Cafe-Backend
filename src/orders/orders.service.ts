@@ -216,7 +216,10 @@ export class OrdersService {
         order: { connect: { id: order.id } },
         delivery_id: BigInt(Date.now()),
         estimated_delivery_time: new Date(Date.now() + 60 * 60 * 1000),
-        delivery_address: orderData.delivery.delivery_address,
+        delivery_address: orderData.delivery_address,
+        customer_latitude: orderData.customer_latitude || null,
+        customer_longitude: orderData.customer_longitude || null,
+        customer_location_note: orderData.customer_location_note || null,
         delivery_fee: orderData.delivery.delivery_fee,
         customer_note: orderData.delivery.customer_note,
       };
