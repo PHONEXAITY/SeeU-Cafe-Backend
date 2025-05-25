@@ -63,7 +63,26 @@ export class OrdersService {
   }
 
   async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
-    // Validation logic (existing code)
+    // ✅ Validate delivery address for delivery orders
+    if (createOrderDto.order_type === 'delivery') {
+      if (
+        !createOrderDto.delivery_address ||
+        createOrderDto.delivery_address.trim() === ''
+      ) {
+        throw new BadRequestException(
+          'Delivery address is required for delivery orders',
+        );
+      }
+
+      // Validate minimum address length
+      if (createOrderDto.delivery_address.trim().length < 5) {
+        throw new BadRequestException(
+          'Delivery address must be at least 5 characters long',
+        );
+      }
+    }
+
+    // Existing validation logic
     if (createOrderDto.User_id) {
       const user = await this.prisma.user.findUnique({
         where: { id: createOrderDto.User_id },
@@ -210,26 +229,53 @@ export class OrdersService {
       );
     }
 
-    // Create delivery if needed
-    if (orderData.order_type === 'delivery' && orderData.delivery) {
+    // ✅ Create delivery if needed - แก้ไขตรงนี้
+    if (orderData.order_type === 'delivery') {
+      // ✅ ตรวจสอบว่ามี delivery_address
+      if (!orderData.delivery_address) {
+        throw new BadRequestException(
+          'Delivery address is required for delivery orders',
+        );
+      }
+
       const deliveryCreateInput: Prisma.DeliveryCreateInput = {
         order: { connect: { id: order.id } },
         delivery_id: BigInt(Date.now()),
         estimated_delivery_time: new Date(Date.now() + 60 * 60 * 1000),
-        delivery_address: orderData.delivery_address,
+        delivery_address: orderData.delivery_address, // ✅ ใช้ delivery_address จาก orderData
         customer_latitude: orderData.customer_latitude || null,
         customer_longitude: orderData.customer_longitude || null,
         customer_location_note: orderData.customer_location_note || null,
-        delivery_fee: orderData.delivery.delivery_fee,
-        customer_note: orderData.delivery.customer_note,
+        delivery_fee: orderData.delivery_fee || null,
+        customer_note: orderData.customer_note || null,
       };
 
-      if (orderData.delivery.carrier_id) {
-        deliveryCreateInput.carrier_id = orderData.delivery.carrier_id;
+      // ✅ ถ้ามี delivery object ให้ใช้ข้อมูลจากนั้นเพิ่มเติม
+      if (orderData.delivery) {
+        if (orderData.delivery.carrier_id) {
+          deliveryCreateInput.carrier_id = orderData.delivery.carrier_id;
+        }
+        if (orderData.delivery.employee_id) {
+          deliveryCreateInput.employee = {
+            connect: { id: orderData.delivery.employee_id },
+          };
+        }
+
+        // ✅ ใช้ delivery_fee จาก delivery object ถ้ามี
+        if (orderData.delivery.delivery_fee) {
+          deliveryCreateInput.delivery_fee = orderData.delivery.delivery_fee;
+        }
+
+        // ✅ ใช้ customer_note จาก delivery object ถ้ามี
+        if (orderData.delivery.customer_note) {
+          deliveryCreateInput.customer_note = orderData.delivery.customer_note;
+        }
       }
-      if (orderData.delivery.employee_id) {
+
+      // ✅ ถ้ามี employee_id ในระดับ root ให้ใช้แทน
+      if (orderData.employee_id) {
         deliveryCreateInput.employee = {
-          connect: { id: orderData.delivery.employee_id },
+          connect: { id: orderData.employee_id },
         };
       }
 
@@ -238,7 +284,7 @@ export class OrdersService {
       });
     }
 
-    // 🔥 NEW: Send order creation notification
+    // Send order creation notification
     try {
       const createdOrder = await this.findOne(order.id);
 

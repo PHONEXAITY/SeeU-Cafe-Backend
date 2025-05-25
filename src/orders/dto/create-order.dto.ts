@@ -127,18 +127,22 @@ export class CreateOrderDto {
   @Type(() => CreateDeliveryDto)
   delivery?: CreateDeliveryDto;
 
+  // ✅ แก้ไข: ทำให้ delivery_address เป็น optional และใช้เฉพาะเมื่อเป็น delivery order
   @ApiProperty({
-    description: 'Delivery address',
+    description: 'Delivery address (required for delivery orders)',
     example: '123 Main St, Bangkok, Thailand',
+    required: false,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  delivery_address: string;
+  delivery_address?: string;
+
   @ApiProperty({
     description: 'Customer latitude coordinate',
     example: 19.8845,
     minimum: -90,
     maximum: 90,
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -152,6 +156,7 @@ export class CreateOrderDto {
     example: 102.135,
     minimum: -180,
     maximum: 180,
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -168,6 +173,7 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   customer_location_note?: string;
+
   @ApiProperty({
     description: 'ID of the carrier (if applicable)',
     example: 1,
