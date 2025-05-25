@@ -11,9 +11,10 @@ import { OrderHistoryService } from './order-history/order-history.service';
 import { OrderHistoryController } from './order-history/order-history.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CustomerNotificationsModule } from '../customer-notifications/customer-notifications.module';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
-  imports: [PrismaModule, CustomerNotificationsModule],
+  imports: [PrismaModule, CustomerNotificationsModule, HttpModule],
   controllers: [
     OrdersController,
     OrderDetailsController,

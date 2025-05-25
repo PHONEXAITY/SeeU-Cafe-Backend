@@ -5,7 +5,10 @@ import {
   IsOptional,
   IsString,
   IsInt,
+  Min,
+  Max,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateDeliveryDto {
   @ApiProperty({
@@ -51,4 +54,41 @@ export class CreateDeliveryDto {
   @IsOptional()
   @IsString()
   customer_note?: string;
+
+  @ApiProperty({
+    description: 'Customer latitude coordinate',
+    example: 19.8845,
+    minimum: -90,
+    maximum: 90,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @Type(() => Number)
+  customer_latitude?: number;
+
+  @ApiProperty({
+    description: 'Customer longitude coordinate',
+    example: 102.135,
+    minimum: -180,
+    maximum: 180,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @Type(() => Number)
+  customer_longitude?: number;
+
+  @ApiProperty({
+    description: 'Additional location note for customer address',
+    example: 'Near the temple, blue building',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  customer_location_note?: string;
 }
