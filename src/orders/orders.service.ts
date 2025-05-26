@@ -22,6 +22,7 @@ import { InputJsonValue } from '@prisma/client/runtime/library';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 type OrderWithRelations = Order & {
@@ -56,12 +57,50 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly customerNotificationsService: CustomerNotificationsService,
     private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {
     this.redisClient = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379'),
     });
+  }
+
+  private async sendWebhookToN8n(orderData: any) {
+    try {
+      const webhookUrl = this.configService.get<string>('N8N_WEBHOOK_URL');
+
+      if (!webhookUrl) {
+        console.log('N8N_WEBHOOK_URL not configured, skipping webhook');
+        return;
+      }
+
+      // ส่งข้อมูลไป n8n
+      const response = await this.httpService.axiosRef.post(
+        webhookUrl,
+        orderData,
+        {
+          timeout: 5000,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      console.log('✅ Webhook sent to n8n successfully:', {
+        orderId: orderData.order_id,
+        status: response.status,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to send webhook to n8n:', {
+        orderId: orderData.order_id,
+        error: error.message,
+      });
+      // ไม่ throw error เพื่อไม่ให้การสร้างออเดอร์ล้มเหลว
+    }
   }
 
   async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
@@ -390,6 +429,12 @@ export class OrdersService {
     }
 
     const result = await this.findOne(order.id);
+    try {
+      await this.sendWebhookToN8n(result);
+    } catch (webhookError) {
+      console.error('Webhook notification failed:', webhookError);
+      // ไม่ให้ error ของ webhook ทำให้การสร้างออเดอร์ล้มเหลว
+    }
     console.log('Order creation completed:', result.id);
     return result;
   }
