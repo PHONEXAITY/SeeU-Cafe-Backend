@@ -64,7 +64,7 @@ export class OrdersService {
     });
   }
 
-  /*   async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
+  async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
     console.log(
       'Creating order with data:',
       JSON.stringify(createOrderDto, null, 2),
@@ -244,13 +244,15 @@ export class OrdersService {
         createOrderDto.delivery_address ||
         createOrderDto.delivery?.delivery_address;
 
-      const finalCustomerLatitude =
-        createOrderDto.customer_latitude ||
-        createOrderDto.delivery?.customer_latitude;
+      // ✅ รับพิกัดจาก root level ของ CreateOrderDto ก่อน
+      let finalCustomerLatitude = createOrderDto.customer_latitude;
+      let finalCustomerLongitude = createOrderDto.customer_longitude;
 
-      const finalCustomerLongitude =
-        createOrderDto.customer_longitude ||
-        createOrderDto.delivery?.customer_longitude;
+      // ถ้าไม่มีใน root level ให้หาใน delivery object
+      if (!finalCustomerLatitude || !finalCustomerLongitude) {
+        finalCustomerLatitude = createOrderDto.delivery?.customer_latitude;
+        finalCustomerLongitude = createOrderDto.delivery?.customer_longitude;
+      }
 
       const finalCustomerLocationNote =
         createOrderDto.customer_location_note ||
@@ -275,6 +277,25 @@ export class OrdersService {
         );
       }
 
+      // ✅ ตรวจสอบพิกัดที่จำเป็น
+      if (!finalCustomerLatitude || !finalCustomerLongitude) {
+        throw new BadRequestException(
+          'Customer coordinates are required for delivery orders',
+        );
+      }
+
+      // ✅ ตรวจสอบว่าพิกัดอยู่ในเขตบริการ
+      if (
+        finalCustomerLatitude < 19.8 ||
+        finalCustomerLatitude > 19.95 ||
+        finalCustomerLongitude < 102.05 ||
+        finalCustomerLongitude > 102.25
+      ) {
+        throw new BadRequestException(
+          'Delivery location is outside our service area in Luang Prabang',
+        );
+      }
+
       try {
         const deliveryCreateInput: Prisma.DeliveryCreateInput = {
           order: { connect: { id: order.id } },
@@ -283,9 +304,9 @@ export class OrdersService {
           delivery_address: finalDeliveryAddress,
           estimated_delivery_time: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
 
-          // ✅ เพิ่มพิกัดลูกค้า
-          customer_latitude: finalCustomerLatitude || null,
-          customer_longitude: finalCustomerLongitude || null,
+          // ✅ ใช้พิกัดที่แม่นยำ
+          customer_latitude: Number(finalCustomerLatitude),
+          customer_longitude: Number(finalCustomerLongitude),
           customer_location_note: finalCustomerLocationNote || null,
 
           // ✅ เพิ่มข้อมูลอื่นๆ
@@ -308,7 +329,17 @@ export class OrdersService {
           data: deliveryCreateInput,
         });
 
-        console.log('Delivery created successfully:', createdDelivery.id);
+        console.log(
+          '✅ Delivery created successfully with exact coordinates:',
+          {
+            deliveryId: createdDelivery.id,
+            coordinates: {
+              lat: createdDelivery.customer_latitude,
+              lng: createdDelivery.customer_longitude,
+            },
+            address: createdDelivery.delivery_address,
+          },
+        );
       } catch (deliveryError) {
         console.error('Failed to create delivery:', deliveryError);
 
@@ -361,8 +392,8 @@ export class OrdersService {
     const result = await this.findOne(order.id);
     console.log('Order creation completed:', result.id);
     return result;
-  } */
-  async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
+  }
+  /*  async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
     console.log(
       'Creating order with data:',
       JSON.stringify(createOrderDto, null, 2),
@@ -724,7 +755,7 @@ export class OrdersService {
     const result = await this.findOne(order.id);
     console.log('Order creation completed:', result.id);
     return result;
-  }
+  } */
 
   async findAll(
     status?: string,
