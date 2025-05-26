@@ -157,6 +157,15 @@ export class OrdersService {
           `Table with ID ${createOrderDto.table_id} not found`,
         );
       }
+      if (!['available', 'occupied'].includes(table.status)) {
+        throw new BadRequestException(
+          `Table #${table.number} is ${table.status} and cannot accept new orders`,
+        );
+      }
+
+      console.log(
+        `✅ Table #${table.number} is ${table.status}, proceeding with order`,
+      );
     }
 
     if (createOrderDto.promotion_id) {
@@ -213,11 +222,55 @@ export class OrdersService {
       orderCreateInput.promotion = { connect: { id: orderData.promotion_id } };
     }
 
-    const order = await this.prisma.order.create({
-      data: orderCreateInput,
+    const result = await this.prisma.$transaction(async (prisma) => {
+      // สร้างออเดอร์
+      const order = await prisma.order.create({
+        data: orderCreateInput,
+      });
+
+      console.log('Order created successfully:', order.id);
+
+      // 🔥 NEW: อัพเดทสถานะโต๊ะถ้าเป็น table order
+      if (orderData.table_id && orderData.order_type === 'table') {
+        const table = await prisma.table.findUnique({
+          where: { id: orderData.table_id },
+        });
+
+        if (table) {
+          // อัพเดทสถานะโต๊ะเป็น occupied และตั้งเวลาเซสชัน
+          await prisma.table.update({
+            where: { id: orderData.table_id },
+            data: {
+              status: 'occupied',
+              current_session_start: new Date(),
+              expected_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 ชั่วโมง
+            },
+          });
+
+          console.log(`✅ Table #${table.number} status updated to 'occupied'`);
+
+          // ส่งการแจ้งเตือนให้พนักงาน
+          try {
+            await this.customerNotificationsService.create({
+              message: `โต๊ะ #${table.number} มีลูกค้านั่งแล้ว - ออเดอร์ #${uniqueOrderId}`,
+              type: 'table_occupied',
+              order_id: order.id,
+              target_roles: ['admin', 'employee'],
+              action_url: `/admin/tables/${orderData.table_id}`,
+            });
+          } catch (notificationError) {
+            console.error(
+              'Failed to send table occupied notification:',
+              notificationError,
+            );
+          }
+        }
+      }
+
+      return order;
     });
 
-    console.log('Order created successfully:', order.id);
+    const order = result;
 
     // Create order details
     if (order_details && order_details.length > 0) {
@@ -278,16 +331,13 @@ export class OrdersService {
     if (orderData.order_type === 'delivery') {
       console.log('Creating delivery for order:', order.id);
 
-      // รวบรวมข้อมูล delivery จากหลายแหล่ง
       const finalDeliveryAddress =
         createOrderDto.delivery_address ||
         createOrderDto.delivery?.delivery_address;
 
-      // ✅ รับพิกัดจาก root level ของ CreateOrderDto ก่อน
       let finalCustomerLatitude = createOrderDto.customer_latitude;
       let finalCustomerLongitude = createOrderDto.customer_longitude;
 
-      // ถ้าไม่มีใน root level ให้หาใน delivery object
       if (!finalCustomerLatitude || !finalCustomerLongitude) {
         finalCustomerLatitude = createOrderDto.delivery?.customer_latitude;
         finalCustomerLongitude = createOrderDto.delivery?.customer_longitude;
@@ -316,14 +366,12 @@ export class OrdersService {
         );
       }
 
-      // ✅ ตรวจสอบพิกัดที่จำเป็น
       if (!finalCustomerLatitude || !finalCustomerLongitude) {
         throw new BadRequestException(
           'Customer coordinates are required for delivery orders',
         );
       }
 
-      // ✅ ตรวจสอบว่าพิกัดอยู่ในเขตบริการ
       if (
         finalCustomerLatitude < 19.8 ||
         finalCustomerLatitude > 19.95 ||
@@ -341,19 +389,14 @@ export class OrdersService {
           delivery_id: BigInt(Date.now()),
           status: 'pending',
           delivery_address: finalDeliveryAddress,
-          estimated_delivery_time: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
-
-          // ✅ ใช้พิกัดที่แม่นยำ
+          estimated_delivery_time: new Date(Date.now() + 60 * 60 * 1000),
           customer_latitude: Number(finalCustomerLatitude),
           customer_longitude: Number(finalCustomerLongitude),
           customer_location_note: finalCustomerLocationNote || null,
-
-          // ✅ เพิ่มข้อมูลอื่นๆ
           delivery_fee: finalDeliveryFee || null,
           customer_note: finalCustomerNote || null,
         };
 
-        // เพิ่ม employee หรือ carrier ถ้ามี
         if (createOrderDto.employee_id || delivery?.employee_id) {
           const employeeId =
             createOrderDto.employee_id || delivery?.employee_id;
@@ -382,7 +425,6 @@ export class OrdersService {
       } catch (deliveryError) {
         console.error('Failed to create delivery:', deliveryError);
 
-        // ลบ order ที่สร้างไปแล้วถ้าสร้าง delivery ไม่สำเร็จ
         await this.prisma.order.delete({ where: { id: order.id } });
 
         throw new BadRequestException(
@@ -395,7 +437,6 @@ export class OrdersService {
     try {
       const createdOrder = await this.findOne(order.id);
 
-      // Notify customer about order creation
       if (createdOrder.user?.id) {
         await this.customerNotificationsService.createOrderStatusNotification(
           createdOrder,
@@ -412,7 +453,6 @@ export class OrdersService {
         );
       }
 
-      // Notify employees about new order
       await this.customerNotificationsService.create({
         message: `ມີຄຳສັ່ງຊື້ໃໝ່ #${uniqueOrderId} (${orderData.order_type})`,
         type: 'new_order',
@@ -425,17 +465,161 @@ export class OrdersService {
         'Failed to send order creation notifications:',
         notificationError,
       );
-      // Don't fail the order creation if notification fails
     }
 
-    const result = await this.findOne(order.id);
+    const finalResult = await this.findOne(order.id);
+
     try {
-      await this.sendWebhookToN8n(result);
+      await this.sendWebhookToN8n(finalResult);
     } catch (webhookError) {
       console.error('Webhook notification failed:', webhookError);
-      // ไม่ให้ error ของ webhook ทำให้การสร้างออเดอร์ล้มเหลว
     }
-    console.log('Order creation completed:', result.id);
+
+    console.log('Order creation completed:', finalResult.id);
+    return finalResult;
+  }
+
+  // 🔥 NEW: เพิ่มฟังก์ชันสำหรับปล่อยโต๊ะเมื่อออเดอร์เสร็จสิ้น
+  async completeTableOrder(orderId: number): Promise<void> {
+    const order = await this.findOne(orderId);
+
+    if (order.order_type === 'table' && order.table_id) {
+      // ตรวจสอบว่ามีออเดอร์อื่นในโต๊ะนี้ที่ยังไม่เสร็จหรือไม่
+      const activeOrders = await this.prisma.order.findMany({
+        where: {
+          table_id: order.table_id,
+          status: {
+            in: ['pending', 'preparing', 'ready', 'served'],
+          },
+          id: {
+            not: orderId, // ไม่รวมออเดอร์ปัจจุบัน
+          },
+        },
+      });
+
+      // ถ้าไม่มีออเดอร์อื่นที่ยังไม่เสร็จ ให้ปล่อยโต๊ะ
+      if (activeOrders.length === 0) {
+        const table = await this.prisma.table.update({
+          where: { id: order.table_id },
+          data: {
+            status: 'available',
+            current_session_start: null,
+            expected_end_time: null,
+          },
+        });
+
+        console.log(`✅ Table #${table.number} released and now available`);
+
+        // ส่งการแจ้งเตือน
+        try {
+          await this.customerNotificationsService.create({
+            message: `โต๊ะ #${table.number} ว่างแล้ว - ออเดอร์ #${order.order_id} เสร็จสิ้น`,
+            type: 'table_available',
+            order_id: orderId,
+            target_roles: ['admin', 'employee'],
+            action_url: `/admin/tables/${order.table_id}`,
+          });
+        } catch (notificationError) {
+          console.error(
+            'Failed to send table available notification:',
+            notificationError,
+          );
+        }
+      } else {
+        console.log(
+          `⏳ Table #${order.table?.number} still has ${activeOrders.length} active orders`,
+        );
+      }
+    }
+  }
+
+  // 🔥 UPDATE: ปรับปรุง updateStatus เพื่อจัดการโต๊ะ
+  async updateStatus(
+    id: number,
+    status: string,
+    employeeId?: number,
+    notes?: string,
+  ): Promise<OrderWithRelations> {
+    const orderData = await this.findOne(id);
+
+    await this.prisma.order.update({
+      where: { id },
+      data: { status },
+    });
+
+    await this.prisma.orderTimeline.create({
+      data: {
+        order_id: id,
+        status,
+        employee_id: employeeId,
+        notes: notes || `Status updated to ${status}`,
+      },
+    });
+
+    if (status === 'ready') {
+      await this.prisma.order.update({
+        where: { id },
+        data: { actual_ready_time: new Date() },
+      });
+    }
+
+    // 🔥 NEW: จัดการโต๊ะเมื่อออเดอร์เสร็จสิ้น
+    if (['completed', 'delivered'].includes(status)) {
+      await this.completeTableOrder(id);
+    }
+
+    // Handle delivery status updates
+    if (orderData.order_type === 'delivery' && status === 'in_delivery') {
+      await this.prisma.delivery.update({
+        where: { order_id: id },
+        data: {
+          status: 'delivery',
+          pickup_from_kitchen_time: new Date(),
+        },
+      });
+    }
+
+    if (orderData.order_type === 'delivery' && status === 'delivered') {
+      await this.prisma.delivery.update({
+        where: { order_id: id },
+        data: {
+          status: 'delivered',
+          actual_delivery_time: new Date(),
+        },
+      });
+    }
+
+    // Send status update notification
+    try {
+      const updatedOrder = await this.findOne(id);
+
+      if (updatedOrder.user?.id) {
+        await this.customerNotificationsService.createOrderStatusNotification(
+          updatedOrder,
+          status,
+          notes,
+        );
+      }
+
+      if (['ready', 'completed', 'cancelled'].includes(status)) {
+        await this.customerNotificationsService.create({
+          message: `ຄຳສັ່ງຊື້ #${updatedOrder.order_id} ປ່ຽນສະຖານະເປັນ: ${status}`,
+          type: 'order_update',
+          order_id: id,
+          target_roles: ['admin', 'employee'],
+          action_url: `/admin/orders/${id}`,
+        });
+      }
+    } catch (notificationError) {
+      console.error(
+        'Failed to send status update notifications:',
+        notificationError,
+      );
+    }
+
+    await this.cacheManager.del(`order:${id}`);
+
+    const result = await this.findOne(id);
     return result;
   }
   /*  async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
@@ -1104,7 +1288,7 @@ export class OrdersService {
     return result;
   }
 
-  async updateStatus(
+  /*  async updateStatus(
     id: number,
     status: string,
     employeeId?: number,
@@ -1189,7 +1373,7 @@ export class OrdersService {
 
     const result = await this.findOne(id);
     return result;
-  }
+  } */
 
   async updateTime(
     id: number,

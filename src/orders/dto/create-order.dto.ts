@@ -59,6 +59,14 @@ export class CreateOrderDto {
   @IsOptional()
   @IsInt()
   table_id?: number;
+  @ApiProperty({
+    description: 'Table number (for dine-in orders)',
+    example: 5,
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  table_number?: number;
 
   @ApiProperty({
     description: 'ID of the promotion applied to the order',
