@@ -442,7 +442,7 @@ export class OrdersService {
           createdOrder,
           'confirmed',
           estimatedReadyTime
-            ? `ເວລາເຄື່ອງໄວ້ປະມານ: ${estimatedReadyTime.toLocaleTimeString(
+            ? `ເວລາເຄື່ອງໄດ້ປະມານ: ${estimatedReadyTime.toLocaleTimeString(
                 'lo-LA',
                 {
                   hour: '2-digit',
