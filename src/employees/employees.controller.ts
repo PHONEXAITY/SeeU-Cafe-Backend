@@ -24,6 +24,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { Document } from '@prisma/client';
 import { DocumentDto } from '../documents/dto/document.dto';
+import { GetEmployeeAnalyticsDto } from './dto/employee-analytics.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -352,5 +353,35 @@ export class EmployeesController {
   })
   async remove(@Param('id', ParseIntPipe) id: number) {
     return this.employeesService.remove(id);
+  }
+
+  @Get('analytics/metrics')
+  @ApiOperation({ summary: 'Get employee metrics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Employee metrics' })
+  async getEmployeeMetrics(@Query() query: GetEmployeeAnalyticsDto) {
+    return this.employeesService.getEmployeeMetrics(query);
+  }
+
+  @Get('analytics/activity')
+  @ApiOperation({ summary: 'Get employee activity data (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Employee activity data' })
+  async getEmployeeActivity(@Query() query: GetEmployeeAnalyticsDto) {
+    return this.employeesService.getEmployeeActivity(query);
+  }
+
+  @Get('analytics/positions')
+  @ApiOperation({
+    summary: 'Get employee distribution by position (Admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Employee position distribution' })
+  async getEmployeePositions(@Query() query: GetEmployeeAnalyticsDto) {
+    return this.employeesService.getEmployeePositions(query);
+  }
+
+  @Get('analytics/performance')
+  @ApiOperation({ summary: 'Get employee performance data (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Employee performance data' })
+  async getEmployeePerformance(@Query() query: GetEmployeeAnalyticsDto) {
+    return this.employeesService.getEmployeePerformance(query);
   }
 }
