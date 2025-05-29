@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { BeverageMenuService } from './beverage-menu.service';
 import { CreateBeverageMenuDto } from './dto/create-beverage-menu.dto';
@@ -26,6 +27,7 @@ import {
 @ApiTags('Beverage Menu')
 @Controller('beverage-menu')
 export class BeverageMenuController {
+  private readonly logger = new Logger(BeverageMenuController.name);
   constructor(private readonly beverageMenuService: BeverageMenuService) {}
 
   @Post()
@@ -87,11 +89,33 @@ export class BeverageMenuController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Beverage menu item not found' })
-  update(
+  async update(
     @Param('id') id: string,
     @Body() updateBeverageMenuDto: UpdateBeverageMenuDto,
   ) {
-    return this.beverageMenuService.update(+id, updateBeverageMenuDto);
+    this.logger.log(`🍺 === CONTROLLER UPDATE REQUEST ===`);
+    this.logger.log(`🍺 ID: ${id}`);
+    this.logger.log(
+      `🍺 DTO: ${JSON.stringify(updateBeverageMenuDto, null, 2)}`,
+    );
+
+    try {
+      const result = await this.beverageMenuService.update(
+        +id,
+        updateBeverageMenuDto,
+      );
+
+      this.logger.log(`🍺 === CONTROLLER UPDATE SUCCESS ===`);
+      this.logger.log(`🍺 Result: ${JSON.stringify(result, null, 2)}`);
+
+      return result;
+    } catch (error) {
+      this.logger.error(`🍺 === CONTROLLER UPDATE ERROR ===`);
+      this.logger.error(`🍺 Error: ${error.message}`);
+      this.logger.error(`🍺 Stack: ${error.stack}`);
+
+      throw error;
+    }
   }
 
   @Delete(':id')
