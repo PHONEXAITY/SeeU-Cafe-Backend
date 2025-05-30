@@ -1,5 +1,5 @@
 # ========================================
-# Universal Dockerfile for Development & Production
+# Universal Dockerfile for Development & Production (Fixed)
 # ========================================
 
 # Base image
@@ -25,8 +25,8 @@ FROM base AS dependencies
 COPY package*.json ./
 COPY prisma ./prisma
 
-# Install dependencies
-RUN npm ci --include=dev && npm cache clean --force
+# 🔥 FIX: ใช้ npm install แทน npm ci (เพราะไม่มี package-lock.json)
+RUN npm install && npm cache clean --force
 
 # Generate Prisma client
 RUN npx prisma generate
@@ -70,7 +70,7 @@ COPY . .
 # Build application
 RUN npm run build
 
-# Remove dev dependencies
+# Remove dev dependencies and install only production
 RUN npm ci --only=production && npm cache clean --force
 
 # ========================================
@@ -82,7 +82,8 @@ FROM base AS production
 COPY package*.json ./
 COPY prisma ./prisma
 
-RUN npm ci --only=production && npm cache clean --force
+# 🔥 FIX: ใช้ npm install แทน npm ci สำหรับ production ด้วย
+RUN npm install --only=production && npm cache clean --force
 
 # Generate Prisma client for production
 RUN npx prisma generate

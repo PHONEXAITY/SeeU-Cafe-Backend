@@ -1,0 +1,29 @@
+-- Initialize database for SeeU Cafe
+-- This script runs when PostgreSQL container starts for the first time
+
+-- Set default connection settings
+\set ON_ERROR_STOP on
+
+-- Create database if it doesn't exist (PostgreSQL 15+ syntax)
+SELECT 'CREATE DATABASE seeu_cafe'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'seeu_cafe')\gexec
+
+-- Connect to the database
+\c seeu_cafe;
+
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+-- Set timezone
+SET timezone = 'Asia/Bangkok';
+
+-- Grant permissions
+GRANT ALL PRIVILEGES ON DATABASE seeu_cafe TO postgres;
+
+-- Create initial configuration
+DO $$
+BEGIN
+    RAISE NOTICE 'Database initialization completed for SeeU Cafe';
+END
+$$;

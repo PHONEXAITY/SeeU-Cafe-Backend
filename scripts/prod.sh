@@ -1,10 +1,16 @@
 # ========================================
-# prod.sh - Production Environment
+# scripts/prod.sh - Production Environment  
 # ========================================
 
 #!/bin/bash
-# prod.sh
 set -e
+
+# Colors  
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
 echo -e "${GREEN}🚀 Starting Production Environment...${NC}"
 
@@ -25,7 +31,7 @@ fi
 
 # Start production services
 echo -e "${BLUE}📦 Starting production services...${NC}"
-docker-compose -f docker-compose.universal.yml up -d --build --remove-orphans
+docker-compose up -d --build --remove-orphans
 
 echo -e "${GREEN}✅ Production environment started${NC}"
-echo -e "${BLUE}📊 View logs: docker-compose -f docker-compose.universal.yml logs -f${NC}"
+echo -e "${BLUE}📊 View logs: docker-compose logs -f${NC}"

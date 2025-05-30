@@ -1,81 +1,63 @@
-# ========================================
-# Makefile for SeeU Cafe
-# ========================================
+Development Mode
+bash# วิธีที่ 1: ใช้ Makefile
+make dev
 
-.PHONY: help dev prod deploy clean logs debug
+# วิธีที่ 2: ใช้ script โดยตรง
+./scripts/dev.sh
 
-# Default target
-help:
-	@echo "🍵 SeeU Cafe Docker Commands"
-	@echo "=============================="
-	@echo "dev      - Start development environment"
-	@echo "prod     - Start production environment" 
-	@echo "deploy   - Deploy to production server"
-	@echo "stop     - Stop all services"
-	@echo "clean    - Clean up Docker resources"
-	@echo "logs     - View API logs"
-	@echo "debug    - Debug environment"
-	@echo "shell    - Access API container shell"
-	@echo "db       - Access database shell"
-	@echo "redis    - Access Redis CLI"
+# วิธีที่ 3: ใช้ docker-compose โดยตรง
+NODE_ENV=development BUILD_TARGET=development docker-compose --profile devel
 
-# Development
-dev:
-	@echo "🚀 Starting development environment..."
-	@chmod +x scripts/dev.sh && ./scripts/dev.sh
+Production Mode
+bash# วิธีที่ 1: ใช้ Makefile
+make prod
 
-# Production
-prod:
-	@echo "🚀 Starting production environment..."
-	@chmod +x scripts/prod.sh && ./scripts/prod.sh
+# วิธีที่ 2: ใช้ script โดยตรง
+./scripts/prod.sh
+อื่นๆ
+bash# ดู logs
+make logs
 
-# Deploy
-deploy:
-	@echo "🚀 Deploying to production..."
-	@chmod +x scripts/deploy.sh && ./scripts/deploy.sh
+# Debug ปัญหา
+make debug
 
-# Stop services
-stop:
-	@echo "⏹️  Stopping all services..."
-	@docker-compose -f docker-compose.universal.yml down
+# เข้าไปใน container
+make shell
 
-# Clean up
-clean:
-	@echo "🧹 Cleaning up..."
-	@chmod +x scripts/cleanup.sh && ./scripts/cleanup.sh
+# เข้าไปใน database
+make db
 
-# View logs
-logs:
-	@echo "📋 Viewing API logs..."
-	@docker-compose -f docker-compose.universal.yml logs -f api
+# ล้าง Docker
+make clean
 
-# Debug
-debug:
-	@echo "🔍 Running debug..."
-	@chmod +x scripts/debug.sh && ./scripts/debug.sh
+# หยุด services
+make stop
+🔧 การ Debug:
+ถ้ามีปัญหา:
+bash# 1. ตรวจสอบ Docker
+docker info
 
-# Access shells
-shell:
-	@echo "🐚 Accessing API container..."
-	@docker-compose -f docker-compose.universal.yml exec api sh
+# 2. ตรวจสอบ environment
+cat .env.development
 
-db:
-	@echo "🗄️  Accessing database..."
-	@docker-compose -f docker-compose.universal.yml exec postgres psql -U postgres -d seeu_cafe
+# 3. ดู debug info
+make debug
 
-redis:
-	@echo "📊 Accessing Redis..."
-	@docker-compose -f docker-compose.universal.yml exec redis redis-cli
+# 4. ดู logs
+make logs
 
-# Database operations
-migrate:
-	@echo "🔄 Running migrations..."
-	@docker-compose -f docker-compose.universal.yml exec api npx prisma migrate deploy
+# 5. ล้างและเริ่มใหม่
+make clean
+make dev
 
-seed:
-	@echo "🌱 Seeding database..."
-	@docker-compose -f docker-compose.universal.yml exec api npm run seed
+Test Development:
+bashmake dev
+# รอ services เริ่ม
+curl http://localhost:3000/api
+# ควรได้ "Hello World!"
 
-reset:
-	@echo "🔄 Resetting database..."
-	@docker-compose -f docker-compose.universal.yml exec api npx prisma migrate reset --force
+Test Production:
+bashmake prod
+# รอ services เริ่ม
+curl http://localhost:3000/api
+# ควรได้ "Hello World!"

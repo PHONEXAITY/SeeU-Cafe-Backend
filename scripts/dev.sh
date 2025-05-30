@@ -1,9 +1,8 @@
 #!/bin/bash
 # ========================================
-# dev.sh - Development Environment
+# scripts/dev.sh - Development Environment
 # ========================================
 
-#!/bin/bash
 set -e
 
 # Colors
@@ -36,11 +35,26 @@ if [ -f ".env.development" ]; then
     source .env.development
     set +a
     echo -e "${GREEN}✅ Loaded .env.development${NC}"
+elif [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+    echo -e "${YELLOW}⚠️  Using .env file (consider creating .env.development)${NC}"
 else
-    echo -e "${YELLOW}⚠️  .env.development not found, using .env.example${NC}"
-    cp .env.example .env.development
+    echo -e "${RED}❌ No environment file found${NC}"
+    exit 1
 fi
+
+# Cleanup function
+cleanup() {
+    echo -e "\n${YELLOW}🧹 Stopping services...${NC}"
+    docker-compose down
+    exit 0
+}
+
+# Handle Ctrl+C
+trap cleanup SIGINT SIGTERM
 
 # Start development with profiles
 echo -e "${BLUE}📦 Starting development services...${NC}"
-docker-compose -f docker-compose.universal.yml --profile development up --build --remove-orphans
+docker-compose --profile development up --build --remove-orphans
