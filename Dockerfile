@@ -14,6 +14,9 @@ RUN npm ci
 # Copy all source files
 COPY . .
 
+# Copy templates directory specifically (ensure it exists)
+COPY templates ./templates
+
 # Generate Prisma client before build
 RUN npx prisma generate
 
@@ -45,6 +48,9 @@ RUN npx prisma generate
 
 # Copy build output from development stage
 COPY --from=development /app/dist/ ./dist/
+
+# Copy templates from development stage
+COPY --from=development /app/templates/ ./templates/
 
 # Debug: Verify files copied correctly
 RUN echo "Production stage - Contents of dist directory:" && ls -la dist/ && echo "Checking main.js exists:" && test -f dist/main.js && echo "main.js found in production!"

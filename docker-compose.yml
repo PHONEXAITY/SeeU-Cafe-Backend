@@ -16,6 +16,16 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      # SMTP Configuration
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+      # Push Notifications (Optional)
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     depends_on:
       - postgres
       - redis
@@ -25,10 +35,10 @@ services:
     # volumes:
     #   - .:/app
     #   - /app/node_modules
-    # ✅ ถ้าต้องการ mount เฉพาะ uploads หรือ logs สามารถทำแบบนี้:
+    # ✅ Mount templates จาก host เพื่อให้แก้ไขได้ง่าย
     volumes:
       - uploads-data:/app/uploads
-      - templates-data:/app/templates
+      - ./templates:/app/templates:ro  # Read-only mount
       
 
   postgres:
@@ -88,5 +98,4 @@ volumes:
   postgres-data:
   redis-data:
   n8n-data:
-  uploads-data:    # ✅ เพิ่ม volume สำหรับ uploads
-  templates-data:  # ✅ เพิ่ม volume สำหรับ templates
+  uploads-data:    # ✅ Volume สำหรับ uploads
