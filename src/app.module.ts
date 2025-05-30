@@ -37,7 +37,8 @@ import { CartModule } from './cart/cart.module';
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env.development', '.env'],
+      expandVariables: true,
     }),
 
     // Redis Cache

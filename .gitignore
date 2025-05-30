@@ -42,7 +42,11 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
-.env.production
+
+# ⭐ เก็บ .env.development และ .env.production ไว้ใน repo
+# แต่ .env.production ควรจะมีข้อมูลจริงใน server
+# .env.development  # สำหรับ local dev
+# .env.production   # template สำหรับ production
 
 # Prisma
 /prisma/migrations
@@ -55,3 +59,7 @@ postgres-data/
 redis-data/
 n8n-data/
 uploads/
+
+# Production secrets (สำหรับ server)
+.env.production.local
+.env.secrets

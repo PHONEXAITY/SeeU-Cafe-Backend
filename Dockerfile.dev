@@ -1,11 +1,30 @@
-FROM node:18-alpine AS developmentAdd
+FROM node:20-alpine AS development
 
 WORKDIR /app
 
+# Install netcat for health checks
+RUN apk add --no-cache netcat-openbsd
+
+# Copy package files first
 COPY package*.json ./
 
-RUN npm install
+# Install dependencies without running prepare script
+RUN npm ci --ignore-scripts
 
+# Copy prisma schema
+COPY prisma ./prisma
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Copy rest of the application
 COPY . .
 
+# Build the application
 RUN npm run build
+
+# Expose port
+EXPOSE 3000
+
+# Start the application (command จะถูก override ใน docker-compose)
+CMD ["npm", "run", "start:dev"]

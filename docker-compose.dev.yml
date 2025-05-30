@@ -1,61 +1,56 @@
-version: '3.8'
-
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      env_file:
+      - .env.development
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=development
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRATION=${JWT_EXPIRATION:-7d}
-      - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-604800}
-      - REDIS_HOST=localhost
+      - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-      # Email Configuration (ใช้ชื่อตัวแปรที่ service ต้องการ)
-      - EMAIL_HOST=${SMTP_HOST:-smtp.gmail.com}
-      - EMAIL_PORT=${SMTP_PORT:-587}
-      - EMAIL_USER=${SMTP_USER}
-      - EMAIL_PASSWORD=${SMTP_PASS}
-      - EMAIL_FROM=${SMTP_FROM}
-      - APP_NAME=${APP_NAME:-SeeU Cafe}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
-      # OAuth
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
-      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
-      # Push Notifications
-      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
-      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
-      - VAPID_SUBJECT=${VAPID_SUBJECT}
-      # n8n
-      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - app-network
-    # ❌ ลบ volumes ที่ mount source code ออก - ให้ใช้ไฟล์จาก Docker image แทน
-    # volumes:
-    #   - .:/app
-    #   - /app/node_modules
-    # ✅ Mount templates จาก host เพื่อให้แก้ไขได้ง่าย
     volumes:
-      - uploads-data:/app/uploads
-      - ./templates:/app/templates:ro  # Read-only mount
-      
+      - .:/app
+      - /app/node_modules
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for database to be ready...' &&
+        until nc -z postgres 5432; do
+          echo 'Waiting for postgres...'
+          sleep 2
+        done &&
+        echo 'Waiting for redis to be ready...' &&
+        until nc -z redis 6379; do
+          echo 'Waiting for redis...'
+          sleep 2
+        done &&
+        echo 'Running database migrations...' &&
+        npx prisma migrate deploy &&
+        echo 'Seeding database...' &&
+        npm run seed &&
+        echo 'Starting application...' &&
+        npm run start:dev
+      "
 
   postgres:
     image: postgres:14-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"  # เปลี่ยน port ภายนอก
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -64,15 +59,29 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
   redis:
     image: redis:alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"  # เปลี่ยน port ภายนอก
     volumes:
       - redis-data:/data
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   pgadmin:
     image: dpage/pgadmin4
@@ -82,9 +91,11 @@ services:
     ports:
       - "5050:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
+    restart: unless-stopped
 
   n8n:
     image: n8nio/n8n
@@ -99,7 +110,7 @@ services:
       - n8n-data:/home/node/.n8n
     networks:
       - app-network
-    restart: always
+    restart: unless-stopped
 
 networks:
   app-network:
@@ -109,4 +120,3 @@ volumes:
   postgres-data:
   redis-data:
   n8n-data:
-  uploads-data:    # ✅ Volume สำหรับ uploads
