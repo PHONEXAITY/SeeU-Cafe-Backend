@@ -1,66 +1,116 @@
-FROM node:20-alpine AS development
+# ========================================
+# Universal Dockerfile for Development & Production
+# ========================================
 
+# Base image
+FROM node:20-alpine AS base
 WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache \
+    dumb-init \
+    netcat-openbsd \
+    curl \
+    bash \
+    postgresql-client \
+    redis \
+    && rm -rf /var/cache/apk/*
+
+# ========================================
+# Dependencies Stage
+# ========================================
+FROM base AS dependencies
 
 # Copy package files
 COPY package*.json ./
-
-# Copy prisma schema first
 COPY prisma ./prisma
 
-# Install all dependencies (including devDependencies for building)
-RUN npm ci
+# Install dependencies
+RUN npm ci --include=dev && npm cache clean --force
 
-# Copy all source files
-COPY . .
-
-# Copy templates directory specifically (ensure it exists)
-COPY templates ./templates
-
-# Generate Prisma client before build
+# Generate Prisma client
 RUN npx prisma generate
 
-# Build the application
+# ========================================
+# Development Stage
+# ========================================
+FROM dependencies AS development
+
+# Copy source code
+COPY . .
+
+# Create directories
+RUN mkdir -p uploads templates scripts
+
+# Set non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001 -G nodejs && \
+    chown -R nestjs:nodejs /app
+
+USER nestjs
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:3000/api || exit 1
+
+# Development command
+CMD ["npm", "run", "start:dev"]
+
+# ========================================
+# Build Stage
+# ========================================
+FROM dependencies AS build
+
+# Copy source code
+COPY . .
+
+# Build application
 RUN npm run build
 
-# Debug: List what's in dist directory
-RUN echo "Contents of dist directory:" && ls -la dist/ && echo "Checking main.js exists:" && test -f dist/main.js && echo "main.js found!"
+# Remove dev dependencies
+RUN npm ci --only=production && npm cache clean --force
 
-
-FROM node:20-alpine AS production
-
-ARG NODE_ENV=production
-ENV NODE_ENV=${NODE_ENV}
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Copy prisma schema
-COPY prisma ./prisma
+# ========================================
+# Production Stage
+# ========================================
+FROM base AS production
 
 # Install only production dependencies
+COPY package*.json ./
+COPY prisma ./prisma
+
 RUN npm ci --only=production && npm cache clean --force
 
 # Generate Prisma client for production
 RUN npx prisma generate
 
-# Copy build output from development stage
-COPY --from=development /app/dist/ ./dist/
+# Copy built application from build stage
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/templates ./templates
 
-# Copy templates from development stage
-COPY --from=development /app/templates/ ./templates/
+# Create necessary directories
+RUN mkdir -p uploads
 
-# Debug: Verify files copied correctly
-RUN echo "Production stage - Contents of dist directory:" && ls -la dist/ && echo "Checking main.js exists:" && test -f dist/main.js && echo "main.js found in production!"
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001 -G nodejs && \
+    chown -R nestjs:nodejs /app
 
-# Create uploads directory if it doesn't exist
-RUN mkdir -p uploads templates
+USER nestjs
 
+# Expose port
 EXPOSE 3000
 
-# Alternative CMD options - try one at a time
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:3000/api || exit 1
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Production command
 CMD ["node", "dist/main.js"]
-# CMD ["node", "./dist/main.js"] 
-# CMD ["node", "/app/dist/main.js"]

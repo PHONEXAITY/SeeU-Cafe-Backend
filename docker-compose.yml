@@ -1,105 +1,202 @@
 version: '3.8'
 
+# Universal Docker Compose - ใช้ได้ทั้ง development และ production
 services:
+  # Database Migration Service
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=${NODE_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo '🔄 Running database migrations...' &&
+        npx prisma migrate deploy &&
+        echo '✅ Migrations completed!'
+      "
+    restart: "no"
+    networks:
+      - app-network
+
+  # Seed Service (เฉพาะ development)
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=${NODE_ENV:-production}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: >
+      sh -c "
+        if [ \"$$NODE_ENV\" = \"development\" ]; then
+          echo '🌱 Seeding database...' &&
+          npm run seed &&
+          echo '✅ Seeding completed!'
+        else
+          echo '⏭️ Skipping seed in production'
+        fi
+      "
+    restart: "no"
+    networks:
+      - app-network
+    profiles:
+      - development
+
+  # Main Application
   api:
     build:
       context: .
       dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRATION=${JWT_EXPIRATION:-7d}
-      - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-604800}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-      # Email Configuration (ใช้ชื่อตัวแปรที่ service ต้องการ)
-      - EMAIL_HOST=${SMTP_HOST:-smtp.gmail.com}
-      - EMAIL_PORT=${SMTP_PORT:-587}
-      - EMAIL_USER=${SMTP_USER}
-      - EMAIL_PASSWORD=${SMTP_PASS}
-      - EMAIL_FROM=${SMTP_FROM}
-      - APP_NAME=${APP_NAME:-SeeU Cafe}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
-      # OAuth
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - APP_NAME=${APP_NAME}
+      - FRONTEND_URL=${FRONTEND_URL}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
       - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
-      # Push Notifications
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
-      # n8n
       - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      # Development volumes (only when NODE_ENV=development)
+      - type: bind
+        source: .
+        target: /app
+        bind:
+          create_host_path: true
+        read_only: false
+        # This volume is only mounted in development
+        volume:
+          nocopy: true
+      - type: volume
+        source: node_modules
+        target: /app/node_modules
+      # Production/shared volumes
+      - uploads-data:/app/uploads
+      - ./templates:/app/templates:ro
     networks:
       - app-network
-    # ❌ ลบ volumes ที่ mount source code ออก - ให้ใช้ไฟล์จาก Docker image แทน
-    # volumes:
-    #   - .:/app
-    #   - /app/node_modules
-    # ✅ Mount templates จาก host เพื่อให้แก้ไขได้ง่าย
-    volumes:
-      - uploads-data:/app/uploads
-      - ./templates:/app/templates:ro  # Read-only mount
-      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+  # PostgreSQL Database
   postgres:
     image: postgres:14-alpine
-    ports:
-      - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-seeu_cafe}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     networks:
       - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-seeu_cafe}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
+  # Redis Cache
   redis:
     image: redis:alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
+    command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
     networks:
       - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
+  # PGAdmin (เฉพาะ development)
   pgadmin:
     image: dpage/pgadmin4
     environment:
-      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL}
-      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD}
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin123}
+      - PGADMIN_CONFIG_SERVER_MODE=False
     ports:
-      - "5050:80"
+      - "${PGADMIN_PORT:-5050}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
+    restart: unless-stopped
+    profiles:
+      - development
 
+  # n8n Automation (optional)
   n8n:
     image: n8nio/n8n
     ports:
-      - "5678:5678"
+      - "${N8N_PORT:-5678}:5678"
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=password123
-      - TZ=Asia/Bangkok
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_AUTH_ACTIVE:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_AUTH_PASSWORD:-password123}
+      - TZ=${TZ:-Asia/Bangkok}
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
     volumes:
       - n8n-data:/home/node/.n8n
     networks:
       - app-network
-    restart: always
+    restart: unless-stopped
+    profiles:
+      - n8n
 
 networks:
   app-network:
@@ -109,4 +206,5 @@ volumes:
   postgres-data:
   redis-data:
   n8n-data:
-  uploads-data:    # ✅ Volume สำหรับ uploads
+  uploads-data:
+  node_modules:
