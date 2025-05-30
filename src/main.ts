@@ -42,11 +42,18 @@ async function bootstrap() {
       'http://localhost:3001',
       'http://localhost:3000',
       'http://localhost:3002',
+      'http://127.0.0.1:3001', // เพิ่ม 127.0.0.1
+    'http://127.0.0.1:3000',
+    // 🔥 เพิ่ม Docker internal URLs
+    'http://api:3000',
+    'http://frontend:3001',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept','X-Requested-With',
+    'Origin',],
     exposedHeaders: ['Content-Disposition'],
+    optionsSuccessStatus: 200,
   });
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {

@@ -4,10 +4,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: ${BUILD_TARGET:-production}
+      target: ${BUILD_TARGET:-development}
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=${NODE_ENV:-development}
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,10 +26,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: ${BUILD_TARGET:-production}
+      target: ${BUILD_TARGET:-development}
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=${NODE_ENV:-development}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -54,32 +54,42 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: ${BUILD_TARGET:-production}
+      target: ${BUILD_TARGET:-development}
     ports:
       - "${API_PORT:-3000}:3000"
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=${NODE_ENV:-development}
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-here}
+      - JWT_EXPIRATION=${JWT_EXPIRATION:-7d}
+      - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-604800}
+      # 🔥 NEW: Cookie configuration
+      - COOKIE_DOMAIN=
+      - NEXT_PUBLIC_API_URL=http://localhost:3000/api
+      # Cloudinary
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      # Email
       - EMAIL_HOST=${EMAIL_HOST}
       - EMAIL_PORT=${EMAIL_PORT}
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASSWORD=${EMAIL_PASSWORD}
       - EMAIL_FROM=${EMAIL_FROM}
-      - APP_NAME=${APP_NAME}
-      - FRONTEND_URL=${FRONTEND_URL}
+      - APP_NAME=${APP_NAME:-SeeU Cafe}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
+      # Social Auth
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
       - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
+      # Push Notifications
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
+      # Webhooks
       - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
     depends_on:
       postgres:
@@ -89,18 +99,17 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
-      # 🔥 FIX: แยก source code และ node_modules
+      # 🔥 FIX: เฉพาะ development เท่านั้นที่ bind mount source code
       - type: bind
         source: .
         target: /app
         bind:
           create_host_path: true
-      # 🔥 FIX: ใช้ named volume สำหรับ node_modules (ไม่ mount จาก host)
-      - type: volume
-        source: node_modules_data
-        target: /app/node_modules
-      # Shared volumes for uploads and templates
+      # 🔥 CRITICAL: Anonymous volume สำหรับ node_modules เพื่อไม่ให้ถูก override
+      - /app/node_modules
+      # 🔥 FIX: Uploads volume
       - uploads-data:/app/uploads
+      # 🔥 FIX: Templates volume
       - ./templates:/app/templates:ro
     networks:
       - app-network
@@ -201,5 +210,3 @@ volumes:
   redis-data:
   n8n-data:
   uploads-data:
-  # 🔥 NEW: Named volume สำหรับ node_modules (แก้ปัญหา bcrypt)
-  node_modules_data:

@@ -6,7 +6,7 @@
 FROM node:20-alpine AS base
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Python for bcrypt
 RUN apk add --no-cache \
     dumb-init \
     netcat-openbsd \
@@ -14,6 +14,9 @@ RUN apk add --no-cache \
     bash \
     postgresql-client \
     redis \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/cache/apk/*
 
 # ========================================
@@ -25,7 +28,8 @@ FROM base AS dependencies
 COPY package*.json ./
 COPY prisma ./prisma
 
-# 🔥 FIX: ใช้ npm install แทน npm ci (เพราะไม่มี package-lock.json)
+# 🔥 FIX: Install dependencies with proper compilation for Alpine
+ENV NODE_ENV=development
 RUN npm install && npm cache clean --force
 
 # Generate Prisma client
@@ -41,6 +45,9 @@ COPY . .
 
 # Create directories
 RUN mkdir -p uploads templates scripts
+
+# Set environment
+ENV NODE_ENV=development
 
 # Set non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -67,30 +74,32 @@ FROM dependencies AS build
 # Copy source code
 COPY . .
 
+# Set environment for build
+ENV NODE_ENV=production
+
 # Build application
 RUN npm run build
-
-# Remove dev dependencies and install only production
-RUN npm ci --only=production && npm cache clean --force
 
 # ========================================
 # Production Stage
 # ========================================
 FROM base AS production
 
-# Install only production dependencies
+# Set environment
+ENV NODE_ENV=production
+
+# Copy package files
 COPY package*.json ./
 COPY prisma ./prisma
 
-# 🔥 FIX: ใช้ npm install แทน npm ci สำหรับ production ด้วย
-RUN npm install --only=production && npm cache clean --force
+# Install only production dependencies
+RUN npm ci --only=production && npm cache clean --force
 
 # Generate Prisma client for production
 RUN npx prisma generate
 
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/templates ./templates
 
 # Create necessary directories

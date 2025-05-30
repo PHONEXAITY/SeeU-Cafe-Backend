@@ -28,7 +28,8 @@
     "docker:dev:down": "docker-compose -f docker-compose.dev.yml down",
     "docker:prod": "docker-compose up --build",
     "docker:prod:down": "docker-compose down",
-    "docker:clean": "docker-compose down -v && docker system prune -f"
+    "docker:clean": "docker-compose down -v && docker system prune -f",
+    "seed:script": "node scripts/seed.js"
     
   },
   "dependencies": {

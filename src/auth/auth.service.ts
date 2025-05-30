@@ -277,14 +277,24 @@ export class AuthService {
 
   public setTokenCookie(response: Response, token: string, sessionId: string) {
     const secure = this.configService.get<string>('NODE_ENV') === 'production';
-    const domain = this.configService.get<string>('COOKIE_DOMAIN');
+    const domain = this.configService.get<string>('NODE_ENV') === 'production' 
+    ? this.configService.get<string>('COOKIE_DOMAIN') 
+    : undefined; // ไม่ตั้ง domain สำหรับ development
+
     const maxAge =
       parseInt(
         this.configService.get<string>('JWT_EXPIRATION_SECONDS') ?? '604800',
       ) * 1000;
 
+        console.log('🍪 Setting cookies with config:', {
+    secure,
+    domain,
+    maxAge,
+    nodeEnv: this.configService.get<string>('NODE_ENV')
+  });
+
     response.cookie('auth_token', token, {
-      httpOnly: true,
+      httpOnly: false,
       secure,
       sameSite: 'lax',
       domain,
@@ -300,13 +310,19 @@ export class AuthService {
       maxAge,
       path: '/',
     });
+
+    console.log('✅ Cookies set successfully');
   }
 
   private clearTokenCookie(response: Response) {
-    const domain = this.configService.get<string>('COOKIE_DOMAIN');
+    const domain = this.configService.get<string>('NODE_ENV') === 'production' 
+    ? this.configService.get<string>('COOKIE_DOMAIN') 
+    : undefined;
+
+      console.log('🗑️ Clearing cookies with domain:', domain);
 
     response.clearCookie('auth_token', {
-      httpOnly: true,
+      httpOnly: false,
       domain,
       path: '/',
     });
