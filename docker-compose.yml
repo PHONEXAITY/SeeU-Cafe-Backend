@@ -21,9 +21,14 @@ services:
       - redis
     networks:
       - app-network
+    # ❌ ลบ volumes ที่ mount source code ออก - ให้ใช้ไฟล์จาก Docker image แทน
+    # volumes:
+    #   - .:/app
+    #   - /app/node_modules
+    # ✅ ถ้าต้องการ mount เฉพาะ uploads หรือ logs สามารถทำแบบนี้:
     volumes:
-      - .:/app
-      - /app/node_modules
+      - uploads-data:/app/uploads
+      - templates-data:/app/templates
       
 
   postgres:
@@ -83,3 +88,5 @@ volumes:
   postgres-data:
   redis-data:
   n8n-data:
+  uploads-data:    # ✅ เพิ่ม volume สำหรับ uploads
+  templates-data:  # ✅ เพิ่ม volume สำหรับ templates
