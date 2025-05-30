@@ -41,9 +41,17 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.local
+.env.production
 
 # Prisma
 /prisma/migrations
 
 # Docker
 docker-compose.override.yml
+
+# Docker volumes
+postgres-data/
+redis-data/
+n8n-data/
+uploads/

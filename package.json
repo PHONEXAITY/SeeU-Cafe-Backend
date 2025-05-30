@@ -29,7 +29,11 @@
     "docker:ps": "docker-compose ps",
     "docker:exec": "docker-compose exec api sh",
     "prepare": "npm run prisma:generate",
-    "migrate:role": "ts-node -P tsconfig.migration.json prisma/migrations/role-migration.ts"
+    "migrate:role": "ts-node -P tsconfig.migration.json prisma/migrations/role-migration.ts",
+     "docker:dev": "docker-compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.development up --build",
+    "docker:prod": "docker-compose --env-file .env.production up --build -d",
+    "docker:dev:down": "docker-compose -f docker-compose.yml -f docker-compose.dev.yml down",
+    "docker:prod:down": "docker-compose down"
   },
   "dependencies": {
     "@nestjs-modules/mailer": "^2.0.2",
