@@ -1,4 +1,4 @@
-FROM node:20.19.2-alpine AS development
+FROM node:20-alpine AS development
 
 WORKDIR /app
 
@@ -9,32 +9,25 @@ COPY package*.json ./
 COPY prisma ./prisma
 
 # Install all dependencies (including devDependencies for building)
-RUN npm install
+RUN npm ci
 
 # Copy all source files
 COPY . .
 
-# Generate Prisma client
+# Generate Prisma client before build
 RUN npx prisma generate
 
 # Build the application
 RUN npm run build
 
-# Verify build output exists
-RUN ls -la dist/
+# Debug: List what's in dist directory
+RUN echo "Contents of dist directory:" && ls -la dist/ && echo "Checking main.js exists:" && test -f dist/main.js && echo "main.js found!"
 
 
-FROM node:20.19.2-alpine AS production
+FROM node:20-alpine AS production
 
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
-
-# Add security updates
-RUN apk update && apk upgrade
-
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nestjs -u 1001
 
 WORKDIR /app
 
@@ -45,24 +38,23 @@ COPY package*.json ./
 COPY prisma ./prisma
 
 # Install only production dependencies
-RUN npm install --only=production && npm cache clean --force
+RUN npm ci --only=production && npm cache clean --force
 
 # Generate Prisma client for production
 RUN npx prisma generate
 
 # Copy build output from development stage
-COPY --from=development /app/dist ./dist/
+COPY --from=development /app/dist/ ./dist/
 
-# Create necessary directories and set permissions
-RUN mkdir -p uploads templates && \
-    chown -R nestjs:nodejs /app
+# Debug: Verify files copied correctly
+RUN echo "Production stage - Contents of dist directory:" && ls -la dist/ && echo "Checking main.js exists:" && test -f dist/main.js && echo "main.js found in production!"
 
-# Verify that main.js exists
-RUN ls -la dist/ && test -f dist/main.js
-
-# Switch to non-root user
-USER nestjs
+# Create uploads directory if it doesn't exist
+RUN mkdir -p uploads templates
 
 EXPOSE 3000
 
+# Alternative CMD options - try one at a time
 CMD ["node", "dist/main.js"]
+# CMD ["node", "./dist/main.js"] 
+# CMD ["node", "/app/dist/main.js"]
