@@ -2,6 +2,7 @@ import { Controller, Post, Body, Headers, Logger, Get } from '@nestjs/common';
 import { WebhookService } from './webhook.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+// 🔥 แก้ไข: อัพเดท interface ให้ครบถ้วน
 export interface OrderWebhookPayload {
   orderId: string;
   userId?: number;
@@ -41,6 +42,7 @@ export interface OrderWebhookPayload {
     discountAmount: number;
   };
   preparationNotes?: string;
+  pickupCode?: string; // 🔥 เพิ่ม property นี้
   createdAt?: string;
   timestamp: string;
 }
@@ -88,118 +90,117 @@ export class WebhookController {
   }
 
   // 1. แจ้งเตือนเมื่อมี Order ใหม่ (Line Messenger)
-@Post('order-notification')
-async newOrderNotification(
-  @Body() payload: OrderWebhookPayload,
-  @Headers() headers: Record<string, string>
-) {
-  const requestId = Date.now().toString();
-  
-  // 🔥 Enhanced logging with request tracking
-  this.logger.log(`📥 [${requestId}] New order notification received`, {
-    orderId: payload.orderId,
-    source: headers['x-webhook-source'] || 'unknown',
-    userAgent: headers['user-agent'] || 'unknown',
-    contentType: headers['content-type'] || 'unknown',
-    contentLength: JSON.stringify(payload).length,
-    timestamp: new Date().toISOString(),
-  });
-
-  // Log complete payload structure for debugging
-  this.logger.debug(`📋 [${requestId}] Complete payload structure:`, {
-    orderId: payload.orderId,
-    userId: payload.userId,
-    totalPrice: payload.totalPrice,
-    orderType: payload.orderType,
-    status: payload.status,
-    customerInfo: {
-      hasName: !!payload.customerInfo?.name,
-      hasEmail: !!payload.customerInfo?.email,
-      hasPhone: !!payload.customerInfo?.phone,
-      name: payload.customerInfo?.name,
-    },
-    items: {
-      count: payload.items?.length || 0,
-      items: payload.items?.map(item => ({
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-        hasNotes: !!item.notes,
-      })) || [],
-    },
-    orderDetails: {
-      tableNumber: payload.tableNumber,
-      hasDeliveryAddress: !!payload.deliveryAddress,
-      deliveryAddress: payload.deliveryAddress?.substring(0, 50) + '...',
-      estimatedReadyTime: payload.estimatedReadyTime,
-    },
-    payloadKeys: Object.keys(payload),
-  });
-
-  // Validate required fields
-  const validationErrors = [];
-  if (!payload.orderId) validationErrors.push('orderId is missing');
-  if (!payload.totalPrice || payload.totalPrice <= 0) validationErrors.push('totalPrice is invalid');
-  if (!payload.orderType) validationErrors.push('orderType is missing');
-  if (!payload.items || payload.items.length === 0) validationErrors.push('items array is empty');
-
-  if (validationErrors.length > 0) {
-    this.logger.error(`❌ [${requestId}] Validation failed:`, {
-      orderId: payload.orderId,
-      errors: validationErrors,
-    });
+  @Post('order-notification')
+  async newOrderNotification(
+    @Body() payload: OrderWebhookPayload,
+    @Headers() headers: Record<string, string>
+  ) {
+    const requestId = Date.now().toString();
     
-    return {
-      success: false,
-      error: 'Validation failed',
-      details: validationErrors,
+    this.logger.log(`📥 [${requestId}] New order notification received`, {
       orderId: payload.orderId,
-      requestId,
-    };
-  }
-
-  try {
-    this.logger.log(`🔄 [${requestId}] Processing order notification...`);
-    
-    const result = await this.webhookService.sendNewOrderNotification(payload);
-    
-    this.logger.log(`✅ [${requestId}] Order notification processed successfully:`, {
-      orderId: payload.orderId,
-      sent: result.sent,
-      via: result.via,
-      messageId: result.messageId,
-      customerName: result.customerName,
-      itemsCount: result.itemsCount,
+      source: headers['x-webhook-source'] || 'unknown',
+      userAgent: headers['user-agent'] || 'unknown',
+      contentType: headers['content-type'] || 'unknown',
+      contentLength: JSON.stringify(payload).length,
+      timestamp: new Date().toISOString(),
     });
 
-    return { 
-      success: true, 
-      message: 'Order notification sent successfully',
+    this.logger.debug(`📋 [${requestId}] Complete payload structure:`, {
       orderId: payload.orderId,
-      requestId,
-      result: {
+      userId: payload.userId,
+      totalPrice: payload.totalPrice,
+      orderType: payload.orderType,
+      status: payload.status,
+      customerInfo: {
+        hasName: !!payload.customerInfo?.name,
+        hasEmail: !!payload.customerInfo?.email,
+        hasPhone: !!payload.customerInfo?.phone,
+        name: payload.customerInfo?.name,
+      },
+      items: {
+        count: payload.items?.length || 0,
+        items: payload.items?.map(item => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          hasNotes: !!item.notes,
+        })) || [],
+      },
+      orderDetails: {
+        tableNumber: payload.tableNumber,
+        hasDeliveryAddress: !!payload.deliveryAddress,
+        deliveryAddress: payload.deliveryAddress?.substring(0, 50) + '...',
+        estimatedReadyTime: payload.estimatedReadyTime,
+      },
+      payloadKeys: Object.keys(payload),
+    });
+
+    // 🔥 แก้ไข: กำหนดประเภทให้ validationErrors อย่างชัดเจน
+    const validationErrors: string[] = [];
+    if (!payload.orderId) validationErrors.push('orderId is missing');
+    if (!payload.totalPrice || payload.totalPrice <= 0) validationErrors.push('totalPrice is invalid');
+    if (!payload.orderType) validationErrors.push('orderType is missing');
+    if (!payload.items || payload.items.length === 0) validationErrors.push('items array is empty');
+
+    if (validationErrors.length > 0) {
+      this.logger.error(`❌ [${requestId}] Validation failed:`, {
+        orderId: payload.orderId,
+        errors: validationErrors,
+      });
+      
+      return {
+        success: false,
+        error: 'Validation failed',
+        details: validationErrors,
+        orderId: payload.orderId,
+        requestId,
+      };
+    }
+
+    try {
+      this.logger.log(`🔄 [${requestId}] Processing order notification...`);
+      
+      const result = await this.webhookService.sendNewOrderNotification(payload);
+      
+      this.logger.log(`✅ [${requestId}] Order notification processed successfully:`, {
+        orderId: payload.orderId,
         sent: result.sent,
         via: result.via,
         messageId: result.messageId,
-        customerName: result.customerName,
-        itemsCount: result.itemsCount,
-      }
-    };
-  } catch (error) {
-    this.logger.error(`❌ [${requestId}] Failed to send order notification:`, {
-      orderId: payload.orderId,
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-    });
+        // 🔥 แก้ไข: ตรวจสอบว่า property มีอยู่จริงก่อนใช้
+        customerName: result.customerName || payload.customerInfo?.name || 'unknown',
+        itemsCount: result.itemsCount || payload.items?.length || 0,
+      });
 
-    return { 
-      success: false, 
-      error: error.message,
-      orderId: payload.orderId,
-      requestId,
-    };
+      return { 
+        success: true, 
+        message: 'Order notification sent successfully',
+        orderId: payload.orderId,
+        requestId,
+        result: {
+          sent: result.sent,
+          via: result.via,
+          messageId: result.messageId,
+          customerName: result.customerName || payload.customerInfo?.name || 'unknown',
+          itemsCount: result.itemsCount || payload.items?.length || 0,
+        }
+      };
+    } catch (error) {
+      this.logger.error(`❌ [${requestId}] Failed to send order notification:`, {
+        orderId: payload.orderId,
+        error: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      });
+
+      return { 
+        success: false, 
+        error: error.message,
+        orderId: payload.orderId,
+        requestId,
+      };
+    }
   }
-}
 
   // 2. ส่งรายงานยอดขาย (Gmail SMTP)
   @Post('sales-report')
@@ -241,7 +242,7 @@ async newOrderNotification(
         success: true, 
         message: 'Pickup code sent successfully',
         orderId: payload.orderId,
-        pickupCode: payload.pickupCode,
+        pickupCode: payload.pickupCode || 'N/A', // 🔥 แก้ไข: ใช้ fallback
         result 
       };
     } catch (error) {

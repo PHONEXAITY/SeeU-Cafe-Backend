@@ -8,6 +8,26 @@ import {
   TableStatusPayload 
 } from './webhook.controller';
 
+interface WebhookNotificationResult {
+  sent: boolean;
+  via: string;
+  messageId?: string;
+  customerName?: string;
+  itemsCount?: number;
+  reason?: string;
+  fallbackReason?: string;
+  error?: string;
+  timestamp: string;
+  requestId?: string;
+}
+
+interface LineApiResponse {
+  sentMessages?: Array<{
+    id: string;
+  }>;
+  [key: string]: any;
+}
+
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
@@ -17,12 +37,10 @@ export class WebhookService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService
   ) {
-    // Log environment variables for debugging
     this.logger.log(`EMAIL_HOST: ${this.configService.get('EMAIL_HOST')}`);
     this.logger.log(`EMAIL_USER: ${this.configService.get('EMAIL_USER')}`);
     this.logger.log(`ADMIN_EMAIL: ${this.configService.get('ADMIN_EMAIL')}`);
     
-    // Initialize asynchronously with delay
     setTimeout(() => {
       this.initializeMailTransporter().catch(error => {
         this.logger.error('Failed to initialize mail transporter:', error);
@@ -31,330 +49,303 @@ export class WebhookService {
     }, 1000); // รอ 1 วินาที
   }
 
-  private async initializeMailTransporter() {
-    try {
-      // @ts-ignore - ปิด TypeScript checking สำหรับ nodemailer
-      const nodemailer = require('nodemailer');
-      
-      const emailHost = this.configService.get<string>('EMAIL_HOST');
-      const emailUser = this.configService.get<string>('EMAIL_USER');
-      const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
-      
-      this.logger.log(`Trying to initialize mail with: ${emailHost}, ${emailUser}`);
-      
-      if (!emailHost || !emailUser || !emailPassword) {
-        this.logger.warn('Email configuration incomplete:', {
-          hasHost: !!emailHost,
-          hasUser: !!emailUser,
-          hasPassword: !!emailPassword
-        });
-        this.mailTransporter = null;
-        return;
-      }
+private async initializeMailTransporter() {
+  try {
+    const nodemailer = require('nodemailer');
+    
+    const emailHost = this.configService.get<string>('EMAIL_HOST');
+    const emailUser = this.configService.get<string>('EMAIL_USER');
+    const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
+    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
+    
+    this.logger.log(`Initializing mail transporter: ${emailHost}:${emailPort}`);
+    
+    if (!emailHost || !emailUser || !emailPassword) {
+      this.logger.warn('Email configuration incomplete');
+      this.mailTransporter = null;
+      return;
+    }
 
-      if (!nodemailer || typeof nodemailer.createTransporter !== 'function') {
-        this.logger.error('nodemailer.createTransporter is not a function');
-        this.mailTransporter = null;
-        return;
-      }
-      
-      this.mailTransporter = nodemailer.createTransporter({
-        host: emailHost,
-        port: parseInt(this.configService.get<string>('EMAIL_PORT') || '587'),
-        secure: false,
-        auth: {
-          user: emailUser,
-          pass: emailPassword,
-        },
-      });
-      
-      this.logger.log('Mail transporter initialized successfully');
-      
-      // ตรวจสอบ connection
+    this.mailTransporter = nodemailer.createTransport({
+      host: emailHost,
+      port: emailPort,
+      secure: false, // ใช้ STARTTLS แทน SSL
+      auth: {
+        user: emailUser,
+        pass: emailPassword,
+      },
+      tls: {
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3'
+      },
+      debug: process.env.NODE_ENV === 'development',
+      logger: process.env.NODE_ENV === 'development',
+      connectionTimeout: 60000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000,
+    });
+    
+    this.logger.log('Mail transporter created, testing connection...');
+    
+    await new Promise((resolve, reject) => {
       this.mailTransporter.verify((error: any, success: any) => {
         if (error) {
           this.logger.error('SMTP connection failed:', error.message);
           this.mailTransporter = null;
+          reject(error);
         } else {
-          this.logger.log('SMTP connection verified successfully');
+          this.logger.log('✅ SMTP connection verified successfully');
+          resolve(success);
         }
       });
-    } catch (error) {
-      this.logger.error('Failed to initialize mail transporter:', error);
-      this.mailTransporter = null;
-    }
-  }
-
-  // 1. แจ้งเตือนเมื่อมี Order ใหม่ผ่าน Line
- async sendNewOrderNotification(payload: OrderWebhookPayload) {
-  this.logger.log(`Sending new order notification for order: ${payload.orderId}`);
-  
-  // 🔥 แก้ไข: ตรวจสอบ payload structure
-  console.log('📥 Received webhook payload:', {
-    orderId: payload.orderId,
-    totalPrice: payload.totalPrice,
-    orderType: payload.orderType,
-    itemsCount: payload.items?.length || 0,
-    hasCustomerInfo: !!payload.customerInfo,
-    payloadKeys: Object.keys(payload),
-  });
-
-  // Test mode สำหรับ demo
-  if (payload.orderId?.toString().startsWith('TEST')) {
-    return await this.sendTestOrderNotification(payload);
-  }
-  
-  // ดึงข้อมูล order จริงจาก database
-  const order = await this.prisma.order.findUnique({
-    where: { order_id: payload.orderId },
-    include: {
-      user: true,
-      order_details: {
-        include: {
-          food_menu: true,
-          beverage_menu: true
-        }
-      },
-      table: true,
-      delivery: true,
-      promotion: true,
-    }
-  });
-
-  if (!order) {
-    this.logger.warn(`Order not found in database: ${payload.orderId}`);
-    // ใช้ข้อมูลจาก payload แทน
-    return await this.sendOrderNotificationFromPayload(payload);
-  }
-
-  // สำหรับ Line Messenger API
-  const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
-  const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
-  
-  if (!lineToken || !lineUserId) {
-    this.logger.warn('Line credentials not configured, sending via email instead');
-    return await this.sendOrderNotificationEmail(order, payload);
-  }
-
-  // 🔥 แก้ไข: ใช้ข้อมูลจาก payload หรือ database
-  const itemsList = (payload.items || order.order_details).map(detail => {
-    if (payload.items) {
-      // ใช้ข้อมูลจาก payload
-      return `• ${detail.name} x${detail.quantity} (฿${detail.price.toLocaleString()})`;
-    } else {
-      // ใช้ข้อมูลจาก database
-      const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-      return `• ${itemName} x${detail.quantity} (฿${detail.price.toLocaleString()})`;
-    }
-  }).join('\n');
-
-  const customerName = payload.customerInfo?.name || 
-                      `${order.user?.first_name || ''} ${order.user?.last_name || ''}`.trim() || 
-                      'ลูกค้า';
-
-  const customerPhone = payload.customerInfo?.phone || 
-                       order.user?.phone || 
-                       'ไม่ระบุ';
-
-  const tableInfo = payload.tableNumber || order.table?.number;
-
-  // 🔥 แก้ไข: สร้างข้อความที่มีข้อมูลครบถ้วน
-  const message = `🔔 *ออเดอร์ใหม่!*
-📋 รหัส: ${payload.orderId}
-💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
-📱 ประเภท: ${this.getOrderTypeText(payload.orderType)}
-👤 ลูกค้า: ${customerName}
-📞 เบอร์: ${customerPhone}
-${tableInfo ? `🪑 โต๊ะ: ${tableInfo}` : ''}
-${payload.deliveryAddress ? `🚚 ที่อยู่: ${payload.deliveryAddress}` : ''}
-
-📝 รายการ:
-${itemsList}
-
-${payload.estimatedReadyTime ? `⏰ เวลาเสร็จโดยประมาณ: ${new Date(payload.estimatedReadyTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}` : ''}
-
-กรุณาเตรียมออเดอร์`;
-
-  try {
-    const response = await axios.post(
-      'https://api.line.me/v2/bot/message/push',
-      {
-        to: lineUserId,
-        messages: [
-          {
-            type: 'text',
-            text: message
-          }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${lineToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    this.logger.log(`✅ Line notification sent successfully for order: ${payload.orderId}`);
-
-    return { 
-      sent: true, 
-      via: 'line',
-      messageId: (response.data as any)?.sentMessages?.[0]?.id,
-      orderId: payload.orderId,
-      customerName,
-      itemsCount: payload.items?.length || order.order_details.length,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    this.logger.error('Failed to send Line notification:', error);
-    // Fallback ส่งผ่าน email
-    return await this.sendOrderNotificationEmail(order, payload);
-  }
-}
-private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
-  const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
-  const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
-  
-  if (!lineToken || !lineUserId) {
-    this.logger.warn('Line credentials not configured');
-    return { sent: false, via: 'none', reason: 'No Line credentials' };
-  }
-
-  const itemsList = payload.items?.map(item => 
-    `• ${item.name} x${item.quantity} (฿${item.price.toLocaleString()})`
-  ).join('\n') || '• ไม่มีรายการสินค้า';
-
-  const message = `🔔 *ออเดอร์ใหม่! (จาก Webhook)*
-📋 รหัส: ${payload.orderId}
-💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
-📱 ประเภท: ${this.getOrderTypeText(payload.orderType)}
-👤 ลูกค้า: ${payload.customerInfo?.name || 'ลูกค้า'}
-📞 เบอร์: ${payload.customerInfo?.phone || 'ไม่ระบุ'}
-
-📝 รายการ:
-${itemsList}
-
-⚠️ ไม่พบข้อมูลในฐานข้อมูล - กรุณาตรวจสอบ`;
-
-  try {
-    const response = await axios.post(
-      'https://api.line.me/v2/bot/message/push',
-      {
-        to: lineUserId,
-        messages: [{ type: 'text', text: message }]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${lineToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    return { 
-      sent: true, 
-      via: 'line-webhook-only',
-      messageId: (response.data as any)?.sentMessages?.[0]?.id,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    this.logger.error('Failed to send webhook-only notification:', error);
-    return { sent: false, via: 'line', error: error.message };
-  }
-}
-
-  // Test mode สำหรับ demo
-  private async sendTestOrderNotification(payload: OrderWebhookPayload) {
-    this.logger.log(`Test mode: sending notification for ${payload.orderId}`);
+    });
     
-    const testOrder = {
-      order_id: payload.orderId,
-      total_price: payload.totalPrice,
-      order_type: payload.orderType,
-      user: {
-        first_name: payload.customerInfo?.name?.split(' ')[0] || 'Test',
-        last_name: payload.customerInfo?.name?.split(' ')[1] || 'Customer',
-        phone: payload.customerInfo?.phone || '0812345678',
-        email: payload.customerInfo?.email || 'test@example.com'
+  } catch (error) {
+    this.logger.error('Failed to initialize mail transporter:', error);
+    this.mailTransporter = null;
+    
+    await this.initializeFallbackTransporter();
+  }
+}
+private async initializeFallbackTransporter() {
+  try {
+    const nodemailer = require('nodemailer');
+    
+    this.logger.log('🔄 Trying fallback transporter configuration...');
+    
+    this.mailTransporter = nodemailer.createTransport({
+      service: 'gmail', // ใช้ service แทน host/port
+      auth: {
+        user: this.configService.get<string>('EMAIL_USER'),
+        pass: this.configService.get<string>('EMAIL_PASSWORD'),
       },
-      order_details: [
-        {
-          food_menu: { name: 'กาแฟร้อน' },
-          quantity: 1,
-          price: 150
-        },
-        {
-          food_menu: { name: 'ขนมเค้ก' },
-          quantity: 1,
-          price: 100
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+    
+    await new Promise((resolve, reject) => {
+      this.mailTransporter.verify((error: any, success: any) => {
+        if (error) {
+          this.logger.error('Fallback SMTP connection also failed:', error.message);
+          this.mailTransporter = null;
+          reject(error);
+        } else {
+          this.logger.log('✅ Fallback SMTP connection successful');
+          resolve(success);
         }
-      ],
-      table: null
-    };
+      });
+    });
+    
+  } catch (error) {
+    this.logger.error('Fallback transporter also failed:', error);
+    this.mailTransporter = null;
+  }
+}
 
-    // ลอง Line API ก่อน
+private async sendEmailDirect(mailOptions: any) {
+  try {
+    const nodemailer = require('nodemailer');
+    
+    const directTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: this.configService.get<string>('EMAIL_USER'),
+        pass: this.configService.get<string>('EMAIL_PASSWORD'),
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+
+    const result = await directTransporter.sendMail(mailOptions);
+    
+    this.logger.log('✅ Direct email sent successfully:', {
+      messageId: result.messageId,
+      to: mailOptions.to,
+      subject: mailOptions.subject
+    });
+    
+    return result;
+    
+  } catch (error) {
+    this.logger.error('❌ Direct email sending failed:', error);
+    throw error;
+  }
+}
+
+
+private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      this.logger.log(`📧 Sending email (attempt ${attempt}/${maxRetries})...`);
+      
+      if (this.mailTransporter) {
+        try {
+          const result = await this.mailTransporter.sendMail(mailOptions);
+          this.logger.log(`✅ Email sent successfully via transporter on attempt ${attempt}`);
+          return result;
+        } catch (transporterError) {
+          this.logger.warn(`Transporter failed on attempt ${attempt}, trying direct method...`);
+          this.mailTransporter = null;
+        }
+      }
+      
+      const result = await this.sendEmailDirect(mailOptions);
+      this.logger.log(`✅ Email sent successfully via direct method on attempt ${attempt}`);
+      return result;
+      
+    } catch (error) {
+      this.logger.error(`❌ Email sending attempt ${attempt} failed:`, error.message);
+      
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+    }
+  }
+}
+
+ async sendNewOrderNotification(payload: OrderWebhookPayload): Promise<WebhookNotificationResult> {
+    const requestId = Date.now().toString();
+    this.logger.log(`📥 [${requestId}] Sending new order notification for order: ${payload.orderId}`);
+    
+    console.log(`📋 [${requestId}] Received webhook payload:`, {
+      orderId: payload.orderId,
+      totalPrice: payload.totalPrice,
+      orderType: payload.orderType,
+      itemsCount: payload.items?.length || 0,
+      hasCustomerInfo: !!payload.customerInfo,
+      customerName: payload.customerInfo?.name,
+      timestamp: payload.timestamp,
+    });
+
     const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
     const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
     
-    if (lineToken && lineUserId) {
-      const message = `🔔 *ออเดอร์ใหม่! (TEST)*
-📋 รหัส: ${testOrder.order_id}
-💰 ยอดรวม: ฿${testOrder.total_price.toLocaleString()}
-📱 ประเภท: ${testOrder.order_type}
-👤 ลูกค้า: ${testOrder.user.first_name} ${testOrder.user.last_name}
-📞 เบอร์: ${testOrder.user.phone}
+    if (!lineToken || !lineUserId) {
+      this.logger.warn(`[${requestId}] Line credentials not configured, falling back to email`);
+      return await this.sendOrderNotificationEmail(null, payload);
+    }
 
-📝 รายการ:
-• กาแฟร้อน x1 (฿150)
-• ขนมเค้ก x1 (฿100)
+    const itemsList = payload.items?.map(item => 
+      `• ${item.name} x${item.quantity} (฿${item.price.toLocaleString()})`
+    ).join('\n') || '• ไม่มีรายการสินค้า';
 
-🧪 นี่คือการทดสอบระบบ`;
+    const customerName = payload.customerInfo?.name || 'ลูกค้า';
+    const customerPhone = payload.customerInfo?.phone || 'ไม่ระบุ';
 
+    const isTestOrder = payload.orderId?.toString().includes('TEST');
+    const orderTypeText = this.getOrderTypeText(payload.orderType);
+    
+    let message = `🔔 *ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''}*
+📋 รหัส: ${payload.orderId}
+💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
+📱 ประเภท: ${orderTypeText}
+👤 ลูกค้า: ${customerName}
+📞 เบอร์: ${customerPhone}`;
+
+    if (payload.tableNumber) {
+      message += `\n🪑 โต๊ะ: ${payload.tableNumber}`;
+    }
+    
+    if (payload.deliveryAddress) {
+      message += `\n🚚 ที่อยู่: ${payload.deliveryAddress}`;
+    }
+
+    message += `\n\n📝 รายการ:\n${itemsList}`;
+
+    if (payload.estimatedReadyTime) {
       try {
-        const response = await axios.post(
-          'https://api.line.me/v2/bot/message/push',
-          {
-            to: lineUserId,
-            messages: [{ type: 'text', text: message }]
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${lineToken}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        return { 
-          sent: true, 
-          via: 'line',
-          mode: 'test',
-          messageId: (response.data as any)?.sentMessages?.[0]?.id,
-          timestamp: new Date().toISOString()
-        };
+        const readyTime = new Date(payload.estimatedReadyTime);
+        message += `\n\n⏰ เวลาเสร็จโดยประมาณ: ${readyTime.toLocaleTimeString('th-TH', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        })}`;
       } catch (error) {
-        this.logger.error('Failed to send Line notification:', error);
+        this.logger.warn(`[${requestId}] Invalid estimated ready time: ${payload.estimatedReadyTime}`);
       }
     }
 
-    // Fallback: ส่งผ่าน email
-    return await this.sendOrderNotificationEmail(testOrder);
+    message += `\n\n${isTestOrder ? '🧪 นี่คือการทดสอบระบบ' : '✅ กรุณาเตรียมออเดอร์'}`;
+
+    try {
+      this.logger.log(`[${requestId}] Sending to Line API...`);
+      
+      const response = await axios.post(
+        'https://api.line.me/v2/bot/message/push',
+        {
+          to: lineUserId,
+          messages: [
+            {
+              type: 'text',
+              text: message
+            }
+          ]
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${lineToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      const lineResponse = response.data as LineApiResponse;
+
+      this.logger.log(`✅ [${requestId}] Line notification sent successfully`, {
+        orderId: payload.orderId,
+        responseStatus: response.status,
+        messageLength: message.length,
+      });
+
+      return { 
+        sent: true, 
+        via: 'line',
+        messageId: lineResponse?.sentMessages?.[0]?.id || 'unknown',
+        customerName,
+        itemsCount: payload.items?.length || 0,
+        timestamp: new Date().toISOString(),
+        requestId
+      };
+    } catch (error) {
+      this.logger.error(`❌ [${requestId}] Failed to send Line notification:`, {
+        orderId: payload.orderId,
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      
+      return await this.sendOrderNotificationEmail(null, payload);
+    }
   }
 
-  // Fallback: ส่งแจ้งเตือน order ผ่าน Email
- private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload) {
+private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
+  return await this.sendNewOrderNotification(payload);
+}
+private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload): Promise<WebhookNotificationResult> {
   const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
                     this.configService.get<string>('EMAIL_USER');
 
-  // ใช้ข้อมูลจาก payload ถ้ามี, ถ้าไม่มีใช้จาก order
+  if (!adminEmail) {
+    this.logger.warn('No admin email configured for fallback notification');
+    return { 
+      sent: false, 
+      via: 'email',
+      reason: 'No admin email configured',
+      timestamp: new Date().toISOString()
+    };
+  }
+
   const orderData = payload ? {
     order_id: payload.orderId,
     total_price: payload.totalPrice,
     order_type: payload.orderType,
     user: {
       first_name: payload.customerInfo?.name?.split(' ')[0] || '',
-      last_name: payload.customerInfo?.name?.split(' ')[1] || '',
+      last_name: payload.customerInfo?.name?.split(' ').slice(1).join(' ') || '',
       phone: payload.customerInfo?.phone || '',
     },
     order_details: payload.items || [],
@@ -362,7 +353,7 @@ ${itemsList}
     delivery: payload.deliveryAddress ? { delivery_address: payload.deliveryAddress } : null,
   } : order;
 
-  const itemsList = (payload?.items || order.order_details).map(detail => {
+  const itemsList = (payload?.items || order?.order_details || []).map(detail => {
     if (payload?.items) {
       return `<li>${detail.name} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
     } else {
@@ -371,15 +362,18 @@ ${itemsList}
     }
   }).join('');
 
+  const isTestOrder = orderData.order_id?.toString().includes('TEST');
+  const customerName = orderData.user?.first_name || 'ไม่ระบุ';
+
   const emailHtml = `
   <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <h2 style="color: #2c3e50;">🔔 ออเดอร์ใหม่!</h2>
+    <h2 style="color: #2c3e50;">🔔 ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''}!</h2>
     
     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
       <p><strong>รหัสออเดอร์:</strong> ${orderData.order_id}</p>
       <p><strong>ยอดรวม:</strong> ฿${orderData.total_price.toLocaleString()}</p>
       <p><strong>ประเภท:</strong> ${this.getOrderTypeText(orderData.order_type)}</p>
-      <p><strong>ลูกค้า:</strong> ${orderData.user?.first_name || 'ไม่ระบุ'} ${orderData.user?.last_name || ''}</p>
+      <p><strong>ลูกค้า:</strong> ${customerName} ${orderData.user?.last_name || ''}</p>
       <p><strong>เบอร์:</strong> ${orderData.user?.phone || 'ไม่ระบุ'}</p>
       ${orderData.table ? `<p><strong>โต๊ะ:</strong> ${orderData.table.number}</p>` : ''}
       ${orderData.delivery ? `<p><strong>ที่อยู่จัดส่ง:</strong> ${orderData.delivery.delivery_address}</p>` : ''}
@@ -390,43 +384,41 @@ ${itemsList}
       ${itemsList}
     </ul>
     
-    <p style="color: #e74c3c; font-weight: bold;">กรุณาเตรียมออเดอร์</p>
+    <p style="color: #e74c3c; font-weight: bold;">
+      ${isTestOrder ? '🧪 นี่คือการทดสอบระบบ' : 'กรุณาเตรียมออเดอร์'}
+    </p>
     
-    ${payload ? '<p style="color: #f39c12;"><em>ข้อมูลจาก Webhook</em></p>' : ''}
+    <p style="color: #f39c12;"><em>ส่งผ่าน Email (Line API ไม่สามารถใช้งานได้)</em></p>
   </div>
   `;
 
   const mailOptions = {
     from: this.configService.get<string>('EMAIL_FROM'),
     to: adminEmail,
-    subject: `🔔 ออเดอร์ใหม่ - ${orderData.order_id}`,
+    subject: `🔔 ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''} - ${orderData.order_id}`,
     html: emailHtml
   };
 
   try {
-    if (!this.mailTransporter) {
-      this.logger.warn('Mail transporter not available');
-      return { 
-        sent: false, 
-        via: 'email',
-        reason: 'Mail transporter not available',
-        timestamp: new Date().toISOString()
-      };
-    }
-
-    const result = await this.mailTransporter.sendMail(mailOptions);
+    const result = await this.sendEmailWithRetry(mailOptions);
+    
     return { 
       sent: true, 
       via: 'email',
       messageId: result.messageId,
+      customerName,
+      itemsCount: payload?.items?.length || 0,
+      fallbackReason: 'Line API not available',
       timestamp: new Date().toISOString()
     };
   } catch (error) {
-    this.logger.error('Failed to send notification email:', error);
-    throw new HttpException(
-      'Failed to send notification',
-      HttpStatus.INTERNAL_SERVER_ERROR
-    );
+    this.logger.error('Failed to send notification email after all retries:', error);
+    return { 
+      sent: false, 
+      via: 'email',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
@@ -440,14 +432,12 @@ private getOrderTypeText(orderType: string): string {
   }
 }
 
-  // 2. ส่งรายงานยอดขายผ่าน Email
   async sendSalesReport(payload: SalesReportPayload) {
     this.logger.log(`Generating sales report: ${payload.reportType}`);
     
     try {
       const { startDate, endDate } = this.getDateRange(payload.reportType);
       
-      // ดึงข้อมูลยอดขายจาก database
       const salesData = await this.prisma.order.findMany({
         where: {
           create_at: {
@@ -481,9 +471,7 @@ private getOrderTypeText(orderType: string): string {
         throw new Error('Admin email not configured');
       }
 
-      // ลองใช้ direct nodemailer แทน
       try {
-        // @ts-ignore
         const nodemailer = require('nodemailer');
         const directTransporter = nodemailer.createTransport({
           host: 'smtp.gmail.com',
@@ -518,7 +506,6 @@ private getOrderTypeText(orderType: string): string {
       } catch (directError) {
         this.logger.error('Direct nodemailer failed:', directError);
         
-        // Fallback: ส่งผ่าน transporter เดิม
         if (!this.mailTransporter) {
           this.logger.warn('Mail transporter not available, returning report data only');
           return { 
@@ -561,7 +548,6 @@ private getOrderTypeText(orderType: string): string {
     }
   }
 
-  // 3. ส่ง Pickup Code ผ่าน Email
   async sendPickupCode(payload: OrderWebhookPayload) {
     this.logger.log(`Sending pickup code for order: ${payload.orderId}`);
     
@@ -610,8 +596,6 @@ private getOrderTypeText(orderType: string): string {
     };
 
     try {
-      // ใช้ direct nodemailer
-      // @ts-ignore
       const nodemailer = require('nodemailer');
       const directTransporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
@@ -642,7 +626,6 @@ private getOrderTypeText(orderType: string): string {
     }
   }
 
-  // 4. ส่งใบเสร็จ (แบบ HTML แทน PDF ก่อน)
   async sendReceipt(payload: OrderWebhookPayload) {
     this.logger.log(`Sending receipt for order: ${payload.orderId}`);
     
@@ -725,8 +708,6 @@ private getOrderTypeText(orderType: string): string {
     };
 
     try {
-      // ใช้ direct nodemailer เหมือน sendSalesReport
-      // @ts-ignore
       const nodemailer = require('nodemailer');
       const directTransporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
@@ -757,7 +738,6 @@ private getOrderTypeText(orderType: string): string {
     }
   }
 
-  // 5. อัปเดตสถานะโต๊ะ
   async updateTableStatus(payload: TableStatusPayload) {
     this.logger.log(`Updating table ${payload.tableId} status to: ${payload.newStatus}`);
     
@@ -767,7 +747,6 @@ private getOrderTypeText(orderType: string): string {
         data: { 
           status: payload.newStatus,
           updated_at: new Date(),
-          // อัปเดตเวลาตามสถานะ
           ...(payload.newStatus === 'occupied' && {
             current_session_start: new Date()
           }),
@@ -795,7 +774,6 @@ private getOrderTypeText(orderType: string): string {
     }
   }
 
-  // Helper Methods
   private getDateRange(reportType: string) {
     const now = new Date();
     let startDate: Date;
@@ -823,7 +801,6 @@ private getOrderTypeText(orderType: string): string {
     const totalSales = orders.reduce((sum, order) => sum + order.total_price, 0);
     const totalOrders = orders.length;
     
-    // นับสินค้าที่ขายดี
     const itemCounts = {};
     orders.forEach(order => {
       order.order_details.forEach(detail => {
