@@ -349,4 +349,121 @@ export class TablesService {
       message: 'Table deleted successfully',
     };
   }
+   // 🔥 NEW: เพิ่ม methods สำหรับ n8n integration
+  async releaseTable(id: number, reason?: string) {
+    const table = await this.findOne(id);
+
+    const updatedTable = await this.prisma.table.update({
+      where: { id },
+      data: {
+        status: 'available',
+        current_session_start: null,
+        expected_end_time: null,
+        updated_at: new Date(),
+      },
+    });
+
+    // Log the table release
+    console.log(`🏠 Table #${table.number} released: ${reason || 'Manual release'}`);
+
+    return {
+      success: true,
+      message: `Table #${table.number} released successfully`,
+      table: {
+        ...updatedTable,
+        table_id: updatedTable.table_id.toString(),
+      },
+      reason: reason || 'Manual release',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async occupyTable(id: number) {
+    const table = await this.findOne(id);
+
+    if (table.status === 'occupied') {
+      throw new BadRequestException(`Table #${table.number} is already occupied`);
+    }
+
+    if (table.status === 'maintenance') {
+      throw new BadRequestException(`Table #${table.number} is under maintenance`);
+    }
+
+    const updatedTable = await this.prisma.table.update({
+      where: { id },
+      data: {
+        status: 'occupied',
+        current_session_start: new Date(),
+        expected_end_time: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours from now
+        updated_at: new Date(),
+      },
+    });
+
+    // Log the table occupation
+    console.log(`🪑 Table #${table.number} occupied manually`);
+
+    return {
+      success: true,
+      message: `Table #${table.number} occupied successfully`,
+      table: {
+        ...updatedTable,
+        table_id: updatedTable.table_id.toString(),
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async getTablesByStatus(status: 'available' | 'occupied' | 'maintenance') {
+    const tables = await this.prisma.table.findMany({
+      where: { status },
+      orderBy: { number: 'asc' },
+    });
+
+    return tables.map((table) => ({
+      ...table,
+      table_id: table.table_id.toString(),
+    }));
+  }
+
+  async getTableUsageStats() {
+    const tables = await this.prisma.table.findMany({
+      include: {
+        orders: {
+          where: {
+            create_at: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+            },
+          },
+        },
+      },
+    });
+
+    const stats = {
+      total: tables.length,
+      available: tables.filter(t => t.status === 'available').length,
+      occupied: tables.filter(t => t.status === 'occupied').length,
+      maintenance: tables.filter(t => t.status === 'maintenance').length,
+      utilization: 0,
+      averageSessionDuration: 0,
+      totalOrdersToday: 0,
+    };
+
+    const occupiedTables = tables.filter(t => t.status === 'occupied' && t.current_session_start);
+    
+    if (occupiedTables.length > 0) {
+      const totalSessionTime = occupiedTables.reduce((total, table) => {
+        if (table.current_session_start) {
+          return total + (new Date().getTime() - table.current_session_start.getTime());
+        }
+        return total;
+      }, 0);
+
+      stats.averageSessionDuration = Math.floor(totalSessionTime / occupiedTables.length / (1000 * 60)); // minutes
+    }
+
+    stats.utilization = Math.round((stats.occupied / stats.total) * 100);
+    stats.totalOrdersToday = tables.reduce((total, table) => total + table.orders.length, 0);
+
+    return stats;
+  }
 }

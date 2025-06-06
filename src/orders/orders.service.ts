@@ -66,40 +66,119 @@ export class OrdersService {
     });
   }
 
-  private async sendWebhookToN8n(orderData: any) {
+ private async sendN8nWebhook(
+    webhookType: 'order' | 'pickup' | 'receipt',
+    orderData: any,
+    customData?: any,
+  ) {
     try {
-      const webhookUrl = this.configService.get<string>('N8N_WEBHOOK_URL');
+       let webhookUrl: string | undefined = '';
+      let payload = {};
+
+      switch (webhookType) {
+        case 'order':
+          webhookUrl = this.configService.get<string>('N8N_WEBHOOK_URL');
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: orderData.total_price,
+            orderType: orderData.order_type,
+            customerInfo: {
+              name: `${orderData.user?.first_name || ''} ${orderData.user?.last_name || ''}`.trim(),
+              email: orderData.user?.email,
+              phone: orderData.user?.phone,
+            },
+            items: orderData.order_details?.map(detail => ({
+              name: detail.food_menu?.name || detail.beverage_menu?.name,
+              quantity: detail.quantity,
+              price: detail.price,
+              notes: detail.notes,
+            })),
+            tableNumber: orderData.table?.number,
+            estimatedReadyTime: orderData.estimated_ready_time,
+            deliveryAddress: orderData.delivery?.delivery_address,
+            timestamp: new Date().toISOString(),
+          };
+          break;
+
+        case 'pickup':
+          webhookUrl = this.configService.get<string>('N8N_PICKUP_WEBHOOK_URL');
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: orderData.total_price,
+            orderType: orderData.order_type,
+            pickupCode: orderData.pickup_code,
+            customerInfo: {
+              name: `${orderData.user?.first_name || ''} ${orderData.user?.last_name || ''}`.trim(),
+              email: orderData.user?.email,
+              phone: orderData.user?.phone,
+            },
+            timestamp: new Date().toISOString(),
+          };
+          break;
+
+        case 'receipt':
+          webhookUrl = this.configService.get<string>('N8N_RECEIPT_WEBHOOK_URL');
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: orderData.total_price,
+            orderType: orderData.order_type,
+            customerInfo: {
+              name: `${orderData.user?.first_name || ''} ${orderData.user?.last_name || ''}`.trim(),
+              email: orderData.user?.email,
+              phone: orderData.user?.phone,
+            },
+            items: orderData.order_details?.map(detail => ({
+              name: detail.food_menu?.name || detail.beverage_menu?.name,
+              quantity: detail.quantity,
+              price: detail.price,
+              notes: detail.notes,
+            })),
+            paymentMethod: orderData.payments?.[0]?.method,
+            paidAt: orderData.payments?.[0]?.payment_date,
+            timestamp: new Date().toISOString(),
+          };
+          break;
+      }
 
       if (!webhookUrl) {
-        console.log('N8N_WEBHOOK_URL not configured, skipping webhook');
+        console.log(`N8N webhook URL not configured for ${webhookType}`);
         return;
       }
 
-      // ส่งข้อมูลไป n8n
+      console.log(`🔔 Sending ${webhookType} webhook to n8n:`, webhookUrl);
+
       const response = await this.httpService.axiosRef.post(
         webhookUrl,
-        orderData,
+        payload,
         {
-          timeout: 5000,
+          timeout: 10000,
           headers: {
             'Content-Type': 'application/json',
+            'X-Webhook-Source': 'seeu-cafe-backend',
           },
         },
       );
 
-      console.log('✅ Webhook sent to n8n successfully:', {
+      console.log(`✅ N8N ${webhookType} webhook sent successfully:`, {
         orderId: orderData.order_id,
         status: response.status,
+        responseData: response.data,
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return response.data;
     } catch (error) {
-      console.error('❌ Failed to send webhook to n8n:', {
+      console.error(`❌ Failed to send ${webhookType} webhook to n8n:`, {
         orderId: orderData.order_id,
         error: error.message,
+        webhookType,
       });
-      // ไม่ throw error เพื่อไม่ให้การสร้างออเดอร์ล้มเหลว
+      // ไม่ throw error เพื่อไม่ให้กระทบกับ main flow
     }
   }
 
@@ -469,12 +548,14 @@ export class OrdersService {
 
     const finalResult = await this.findOne(order.id);
 
+    // 🔥 NEW: ส่ง webhook ไปยัง n8n สำหรับ order ใหม่
     try {
-      await this.sendWebhookToN8n(finalResult);
+      await this.sendN8nWebhook('order', finalResult);
     } catch (webhookError) {
-      console.error('Webhook notification failed:', webhookError);
+      console.error('N8N order webhook failed:', webhookError);
     }
 
+    
     console.log('Order creation completed:', finalResult.id);
     return finalResult;
   }
@@ -568,6 +649,14 @@ export class OrdersService {
       await this.completeTableOrder(id);
     }
 
+    // ส่ง receipt ผ่าน n8n
+      try {
+        const completedOrder = await this.findOne(id);
+        await this.sendN8nWebhook('receipt', completedOrder);
+      } catch (webhookError) {
+        console.error('N8N receipt webhook failed:', webhookError);
+      }
+
     // Handle delivery status updates
     if (orderData.order_type === 'delivery' && status === 'in_delivery') {
       await this.prisma.delivery.update({
@@ -621,6 +710,119 @@ export class OrdersService {
 
     const result = await this.findOne(id);
     return result;
+  }
+
+  // 🔥 NEW: เพิ่มฟังก์ชันสำหรับส่ง sales report manual
+  async triggerSalesReport(reportType: 'daily' | 'weekly' | 'monthly') {
+    try {
+      const salesWebhookUrl = this.configService.get<string>('N8N_SALES_WEBHOOK_URL');
+      
+      if (!salesWebhookUrl) {
+        throw new Error('N8N sales webhook URL not configured');
+      }
+
+      // คำนวณ date range
+      const now = new Date();
+      let startDate: Date;
+      let endDate: Date = now;
+
+      switch (reportType) {
+        case 'daily':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'weekly':
+          const weekStart = now.getDate() - now.getDay();
+          startDate = new Date(now.getFullYear(), now.getMonth(), weekStart);
+          break;
+        case 'monthly':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+      }
+
+      // ดึงข้อมูลยอดขาย
+      const salesData = await this.prisma.order.findMany({
+        where: {
+          create_at: {
+            gte: startDate,
+            lte: endDate,
+          },
+          status: {
+            in: ['completed', 'delivered'],
+          },
+        },
+        include: {
+          order_details: {
+            include: {
+              food_menu: true,
+              beverage_menu: true,
+            },
+          },
+          payments: true,
+        },
+      });
+
+      const totalSales = salesData.reduce((sum, order) => sum + order.total_price, 0);
+      const totalOrders = salesData.length;
+
+      // สร้าง top items
+      const itemCounts = {};
+      salesData.forEach(order => {
+        order.order_details.forEach(detail => {
+          const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
+          if (itemName) {
+            itemCounts[itemName] = (itemCounts[itemName] || 0) + detail.quantity;
+          }
+        });
+      });
+
+      const topItems = Object.entries(itemCounts)
+        .sort(([,a], [,b]) => (b as number) - (a as number))
+        .slice(0, 5)
+        .map(([name, count]) => ({ name, count }));
+
+      const payload = {
+        reportType,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        totalSales,
+        totalOrders,
+        topItems,
+        timestamp: new Date().toISOString(),
+      };
+
+      console.log('🔔 Sending sales report webhook to n8n:', salesWebhookUrl);
+
+      const response = await this.httpService.axiosRef.post(
+        salesWebhookUrl,
+        payload,
+        {
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Webhook-Source': 'seeu-cafe-backend',
+          },
+        },
+      );
+
+      console.log('✅ N8N sales report webhook sent successfully:', {
+        reportType,
+        totalSales,
+        totalOrders,
+        status: response.status,
+      });
+
+      return {
+        success: true,
+        reportType,
+        totalSales,
+        totalOrders,
+        topItems,
+        response: response.data,
+      };
+    } catch (error) {
+      console.error('❌ Failed to send sales report webhook to n8n:', error);
+      throw error;
+    }
   }
 
   async findAll(
@@ -1235,6 +1437,12 @@ export class OrdersService {
     await this.cacheManager.del(`order:${id}`);
 
     const result = await this.findOne(id);
+    // 🔥 NEW: ส่ง pickup code ผ่าน n8n
+    try {
+      await this.sendN8nWebhook('pickup', result);
+    } catch (webhookError) {
+      console.error('N8N pickup webhook failed:', webhookError);
+    }
     return result;
   }
 

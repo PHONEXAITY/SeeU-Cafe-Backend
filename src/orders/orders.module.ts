@@ -9,18 +9,24 @@ import { TimeUpdateService } from './time-update/time-update.service';
 import { TimeUpdateController } from './time-update/time-update.controller';
 import { OrderHistoryService } from './order-history/order-history.service';
 import { OrderHistoryController } from './order-history/order-history.controller';
+// Sales Reports
+import { SalesReportController } from './controllers/sales-report.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CustomerNotificationsModule } from '../customer-notifications/customer-notifications.module';
 import { HttpModule } from '@nestjs/axios';
 
 @Module({
-  imports: [PrismaModule, CustomerNotificationsModule, HttpModule],
+  imports: [PrismaModule, CustomerNotificationsModule, HttpModule.register({
+      timeout: 10000,
+      maxRedirects: 5,
+    }),],
   controllers: [
     OrdersController,
     OrderDetailsController,
     OrderTimelineController,
     TimeUpdateController,
     OrderHistoryController,
+    SalesReportController,
   ],
   providers: [
     OrdersService,
