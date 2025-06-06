@@ -198,8 +198,13 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     profiles:
-      - n8n
+      - development  # เปลี่ยนจาก n8n เป็น development
 
 networks:
   app-network:

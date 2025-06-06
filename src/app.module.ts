@@ -6,6 +6,7 @@ import * as redisStore from 'cache-manager-redis-store';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { WebhookModule } from './webhooks/webhook.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -70,6 +71,7 @@ import { CartModule } from './cart/cart.module';
     AuthModule,
     DashboardModule,
     UsersModule,
+    WebhookModule,
     RolesModule, // Add the new RolesModule
     ProductsModule,
     CategoriesModule,
