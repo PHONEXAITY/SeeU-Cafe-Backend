@@ -86,93 +86,183 @@ export class WebhookService {
   }
 
   // 1. แจ้งเตือนเมื่อมี Order ใหม่ผ่าน Line
-  async sendNewOrderNotification(payload: OrderWebhookPayload) {
-    this.logger.log(`Sending new order notification for order: ${payload.orderId}`);
-    
-    // Test mode สำหรับ demo
-    if (payload.orderId.startsWith('TEST')) {
-      return await this.sendTestOrderNotification(payload);
-    }
-    
-    // ดึงข้อมูล order จริงจาก database
-    const order = await this.prisma.order.findUnique({
-      where: { order_id: payload.orderId },
-      include: {
-        user: true,
-        order_details: {
-          include: {
-            food_menu: true,
-            beverage_menu: true
-          }
-        },
-        table: true
-      }
-    });
+ async sendNewOrderNotification(payload: OrderWebhookPayload) {
+  this.logger.log(`Sending new order notification for order: ${payload.orderId}`);
+  
+  // 🔥 แก้ไข: ตรวจสอบ payload structure
+  console.log('📥 Received webhook payload:', {
+    orderId: payload.orderId,
+    totalPrice: payload.totalPrice,
+    orderType: payload.orderType,
+    itemsCount: payload.items?.length || 0,
+    hasCustomerInfo: !!payload.customerInfo,
+    payloadKeys: Object.keys(payload),
+  });
 
-    if (!order) {
-      throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
+  // Test mode สำหรับ demo
+  if (payload.orderId?.toString().startsWith('TEST')) {
+    return await this.sendTestOrderNotification(payload);
+  }
+  
+  // ดึงข้อมูล order จริงจาก database
+  const order = await this.prisma.order.findUnique({
+    where: { order_id: payload.orderId },
+    include: {
+      user: true,
+      order_details: {
+        include: {
+          food_menu: true,
+          beverage_menu: true
+        }
+      },
+      table: true,
+      delivery: true,
+      promotion: true,
     }
+  });
 
-    // สำหรับ Line Messenger API
-    const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
-    const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
-    
-    if (!lineToken || !lineUserId) {
-      this.logger.warn('Line credentials not configured, sending via email instead');
-      return await this.sendOrderNotificationEmail(order);
-    }
+  if (!order) {
+    this.logger.warn(`Order not found in database: ${payload.orderId}`);
+    // ใช้ข้อมูลจาก payload แทน
+    return await this.sendOrderNotificationFromPayload(payload);
+  }
 
-    // สร้างรายการสินค้า
-    const itemsList = order.order_details.map(detail => {
+  // สำหรับ Line Messenger API
+  const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
+  const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
+  
+  if (!lineToken || !lineUserId) {
+    this.logger.warn('Line credentials not configured, sending via email instead');
+    return await this.sendOrderNotificationEmail(order, payload);
+  }
+
+  // 🔥 แก้ไข: ใช้ข้อมูลจาก payload หรือ database
+  const itemsList = (payload.items || order.order_details).map(detail => {
+    if (payload.items) {
+      // ใช้ข้อมูลจาก payload
+      return `• ${detail.name} x${detail.quantity} (฿${detail.price.toLocaleString()})`;
+    } else {
+      // ใช้ข้อมูลจาก database
       const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-      return `• ${itemName} x${detail.quantity} (฿${detail.price})`;
-    }).join('\n');
+      return `• ${itemName} x${detail.quantity} (฿${detail.price.toLocaleString()})`;
+    }
+  }).join('\n');
 
-    const message = `🔔 *ออเดอร์ใหม่!*
-📋 รหัส: ${order.order_id}
-💰 ยอดรวม: ฿${order.total_price.toLocaleString()}
-📱 ประเภท: ${order.order_type}
-👤 ลูกค้า: ${order.user?.first_name || 'ไม่ระบุ'} ${order.user?.last_name || ''}
-📞 เบอร์: ${order.user?.phone || 'ไม่ระบุ'}
-${order.table ? `🪑 โต๊ะ: ${order.table.number}` : ''}
+  const customerName = payload.customerInfo?.name || 
+                      `${order.user?.first_name || ''} ${order.user?.last_name || ''}`.trim() || 
+                      'ลูกค้า';
+
+  const customerPhone = payload.customerInfo?.phone || 
+                       order.user?.phone || 
+                       'ไม่ระบุ';
+
+  const tableInfo = payload.tableNumber || order.table?.number;
+
+  // 🔥 แก้ไข: สร้างข้อความที่มีข้อมูลครบถ้วน
+  const message = `🔔 *ออเดอร์ใหม่!*
+📋 รหัส: ${payload.orderId}
+💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
+📱 ประเภท: ${this.getOrderTypeText(payload.orderType)}
+👤 ลูกค้า: ${customerName}
+📞 เบอร์: ${customerPhone}
+${tableInfo ? `🪑 โต๊ะ: ${tableInfo}` : ''}
+${payload.deliveryAddress ? `🚚 ที่อยู่: ${payload.deliveryAddress}` : ''}
 
 📝 รายการ:
 ${itemsList}
 
+${payload.estimatedReadyTime ? `⏰ เวลาเสร็จโดยประมาณ: ${new Date(payload.estimatedReadyTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}` : ''}
+
 กรุณาเตรียมออเดอร์`;
 
-    try {
-      const response = await axios.post(
-        'https://api.line.me/v2/bot/message/push',
-        {
-          to: lineUserId,
-          messages: [
-            {
-              type: 'text',
-              text: message
-            }
-          ]
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${lineToken}`,
-            'Content-Type': 'application/json'
+  try {
+    const response = await axios.post(
+      'https://api.line.me/v2/bot/message/push',
+      {
+        to: lineUserId,
+        messages: [
+          {
+            type: 'text',
+            text: message
           }
+        ]
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${lineToken}`,
+          'Content-Type': 'application/json'
         }
-      );
+      }
+    );
 
-      return { 
-        sent: true, 
-        via: 'line',
-        messageId: (response.data as any)?.sentMessages?.[0]?.id,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      this.logger.error('Failed to send Line notification:', error);
-      // Fallback ส่งผ่าน email
-      return await this.sendOrderNotificationEmail(order);
-    }
+    this.logger.log(`✅ Line notification sent successfully for order: ${payload.orderId}`);
+
+    return { 
+      sent: true, 
+      via: 'line',
+      messageId: (response.data as any)?.sentMessages?.[0]?.id,
+      orderId: payload.orderId,
+      customerName,
+      itemsCount: payload.items?.length || order.order_details.length,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    this.logger.error('Failed to send Line notification:', error);
+    // Fallback ส่งผ่าน email
+    return await this.sendOrderNotificationEmail(order, payload);
   }
+}
+private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
+  const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
+  const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
+  
+  if (!lineToken || !lineUserId) {
+    this.logger.warn('Line credentials not configured');
+    return { sent: false, via: 'none', reason: 'No Line credentials' };
+  }
+
+  const itemsList = payload.items?.map(item => 
+    `• ${item.name} x${item.quantity} (฿${item.price.toLocaleString()})`
+  ).join('\n') || '• ไม่มีรายการสินค้า';
+
+  const message = `🔔 *ออเดอร์ใหม่! (จาก Webhook)*
+📋 รหัส: ${payload.orderId}
+💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
+📱 ประเภท: ${this.getOrderTypeText(payload.orderType)}
+👤 ลูกค้า: ${payload.customerInfo?.name || 'ลูกค้า'}
+📞 เบอร์: ${payload.customerInfo?.phone || 'ไม่ระบุ'}
+
+📝 รายการ:
+${itemsList}
+
+⚠️ ไม่พบข้อมูลในฐานข้อมูล - กรุณาตรวจสอบ`;
+
+  try {
+    const response = await axios.post(
+      'https://api.line.me/v2/bot/message/push',
+      {
+        to: lineUserId,
+        messages: [{ type: 'text', text: message }]
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${lineToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return { 
+      sent: true, 
+      via: 'line-webhook-only',
+      messageId: (response.data as any)?.sentMessages?.[0]?.id,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    this.logger.error('Failed to send webhook-only notification:', error);
+    return { sent: false, via: 'line', error: error.message };
+  }
+}
 
   // Test mode สำหรับ demo
   private async sendTestOrderNotification(payload: OrderWebhookPayload) {
@@ -253,70 +343,102 @@ ${itemsList}
   }
 
   // Fallback: ส่งแจ้งเตือน order ผ่าน Email
-  private async sendOrderNotificationEmail(order: any) {
-    const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
-                      this.configService.get<string>('EMAIL_USER');
+ private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload) {
+  const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
+                    this.configService.get<string>('EMAIL_USER');
 
-    const itemsList = order.order_details.map(detail => {
+  // ใช้ข้อมูลจาก payload ถ้ามี, ถ้าไม่มีใช้จาก order
+  const orderData = payload ? {
+    order_id: payload.orderId,
+    total_price: payload.totalPrice,
+    order_type: payload.orderType,
+    user: {
+      first_name: payload.customerInfo?.name?.split(' ')[0] || '',
+      last_name: payload.customerInfo?.name?.split(' ')[1] || '',
+      phone: payload.customerInfo?.phone || '',
+    },
+    order_details: payload.items || [],
+    table: payload.tableNumber ? { number: payload.tableNumber } : null,
+    delivery: payload.deliveryAddress ? { delivery_address: payload.deliveryAddress } : null,
+  } : order;
+
+  const itemsList = (payload?.items || order.order_details).map(detail => {
+    if (payload?.items) {
+      return `<li>${detail.name} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+    } else {
       const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
       return `<li>${itemName} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
-    }).join('');
+    }
+  }).join('');
 
-    const emailHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #2c3e50;">🔔 ออเดอร์ใหม่!</h2>
-      
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-        <p><strong>รหัสออเดอร์:</strong> ${order.order_id}</p>
-        <p><strong>ยอดรวม:</strong> ฿${order.total_price.toLocaleString()}</p>
-        <p><strong>ประเภท:</strong> ${order.order_type}</p>
-        <p><strong>ลูกค้า:</strong> ${order.user?.first_name || 'ไม่ระบุ'} ${order.user?.last_name || ''}</p>
-        <p><strong>เบอร์:</strong> ${order.user?.phone || 'ไม่ระบุ'}</p>
-        ${order.table ? `<p><strong>โต๊ะ:</strong> ${order.table.number}</p>` : ''}
-      </div>
-
-      <h3>รายการสินค้า:</h3>
-      <ul style="list-style-type: none; padding: 0;">
-        ${itemsList}
-      </ul>
-      
-      <p style="color: #e74c3c; font-weight: bold;">กรุณาเตรียมออเดอร์</p>
+  const emailHtml = `
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <h2 style="color: #2c3e50;">🔔 ออเดอร์ใหม่!</h2>
+    
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+      <p><strong>รหัสออเดอร์:</strong> ${orderData.order_id}</p>
+      <p><strong>ยอดรวม:</strong> ฿${orderData.total_price.toLocaleString()}</p>
+      <p><strong>ประเภท:</strong> ${this.getOrderTypeText(orderData.order_type)}</p>
+      <p><strong>ลูกค้า:</strong> ${orderData.user?.first_name || 'ไม่ระบุ'} ${orderData.user?.last_name || ''}</p>
+      <p><strong>เบอร์:</strong> ${orderData.user?.phone || 'ไม่ระบุ'}</p>
+      ${orderData.table ? `<p><strong>โต๊ะ:</strong> ${orderData.table.number}</p>` : ''}
+      ${orderData.delivery ? `<p><strong>ที่อยู่จัดส่ง:</strong> ${orderData.delivery.delivery_address}</p>` : ''}
     </div>
-    `;
 
-    const mailOptions = {
-      from: this.configService.get<string>('EMAIL_FROM'),
-      to: adminEmail,
-      subject: `🔔 ออเดอร์ใหม่ - ${order.order_id}`,
-      html: emailHtml
-    };
+    <h3>รายการสินค้า:</h3>
+    <ul style="list-style-type: none; padding: 0;">
+      ${itemsList}
+    </ul>
+    
+    <p style="color: #e74c3c; font-weight: bold;">กรุณาเตรียมออเดอร์</p>
+    
+    ${payload ? '<p style="color: #f39c12;"><em>ข้อมูลจาก Webhook</em></p>' : ''}
+  </div>
+  `;
 
-    try {
-      if (!this.mailTransporter) {
-        this.logger.warn('Mail transporter not available');
-        return { 
-          sent: false, 
-          via: 'email',
-          reason: 'Mail transporter not available',
-          timestamp: new Date().toISOString()
-        };
-      }
+  const mailOptions = {
+    from: this.configService.get<string>('EMAIL_FROM'),
+    to: adminEmail,
+    subject: `🔔 ออเดอร์ใหม่ - ${orderData.order_id}`,
+    html: emailHtml
+  };
 
-      const result = await this.mailTransporter.sendMail(mailOptions);
+  try {
+    if (!this.mailTransporter) {
+      this.logger.warn('Mail transporter not available');
       return { 
-        sent: true, 
+        sent: false, 
         via: 'email',
-        messageId: result.messageId,
+        reason: 'Mail transporter not available',
         timestamp: new Date().toISOString()
       };
-    } catch (error) {
-      this.logger.error('Failed to send notification email:', error);
-      throw new HttpException(
-        'Failed to send notification',
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
     }
+
+    const result = await this.mailTransporter.sendMail(mailOptions);
+    return { 
+      sent: true, 
+      via: 'email',
+      messageId: result.messageId,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    this.logger.error('Failed to send notification email:', error);
+    throw new HttpException(
+      'Failed to send notification',
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
   }
+}
+
+private getOrderTypeText(orderType: string): string {
+  switch (orderType) {
+    case 'pickup': return 'รับเอง';
+    case 'delivery': return 'จัดส่ง';
+    case 'table': return 'ทานที่ร้าน';
+    case 'dine-in': return 'ทานที่ร้าน';
+    default: return orderType;
+  }
+}
 
   // 2. ส่งรายงานยอดขายผ่าน Email
   async sendSalesReport(payload: SalesReportPayload) {

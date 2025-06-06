@@ -13,8 +13,36 @@ export interface OrderWebhookPayload {
     email?: string;
     phone?: string;
   };
-  items?: any[];
-  pickupCode?: string;
+  items?: Array<{
+    id?: number;
+    name: string;
+    quantity: number;
+    price: number;
+    notes?: string;
+    isReady?: boolean;
+    preparationTime?: number;
+  }>;
+  tableNumber?: number;
+  tableId?: number;
+  deliveryAddress?: string;
+  deliveryInfo?: {
+    address: string;
+    customerLatitude?: number;
+    customerLongitude?: number;
+    customerLocationNote?: string;
+    deliveryFee?: number;
+    estimatedDeliveryTime?: string;
+  };
+  estimatedReadyTime?: string;
+  actualReadyTime?: string;
+  promotionInfo?: {
+    id: number;
+    name: string;
+    discountAmount: number;
+  };
+  preparationNotes?: string;
+  createdAt?: string;
+  timestamp: string;
 }
 
 export interface SalesReportPayload {
@@ -60,30 +88,118 @@ export class WebhookController {
   }
 
   // 1. แจ้งเตือนเมื่อมี Order ใหม่ (Line Messenger)
-  @Post('order-notification')
-  async newOrderNotification(
-    @Body() payload: OrderWebhookPayload,
-    @Headers('x-webhook-source') source?: string
-  ) {
-    this.logger.log(`New order notification: ${payload.orderId}`);
+@Post('order-notification')
+async newOrderNotification(
+  @Body() payload: OrderWebhookPayload,
+  @Headers() headers: Record<string, string>
+) {
+  const requestId = Date.now().toString();
+  
+  // 🔥 Enhanced logging with request tracking
+  this.logger.log(`📥 [${requestId}] New order notification received`, {
+    orderId: payload.orderId,
+    source: headers['x-webhook-source'] || 'unknown',
+    userAgent: headers['user-agent'] || 'unknown',
+    contentType: headers['content-type'] || 'unknown',
+    contentLength: JSON.stringify(payload).length,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Log complete payload structure for debugging
+  this.logger.debug(`📋 [${requestId}] Complete payload structure:`, {
+    orderId: payload.orderId,
+    userId: payload.userId,
+    totalPrice: payload.totalPrice,
+    orderType: payload.orderType,
+    status: payload.status,
+    customerInfo: {
+      hasName: !!payload.customerInfo?.name,
+      hasEmail: !!payload.customerInfo?.email,
+      hasPhone: !!payload.customerInfo?.phone,
+      name: payload.customerInfo?.name,
+    },
+    items: {
+      count: payload.items?.length || 0,
+      items: payload.items?.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        hasNotes: !!item.notes,
+      })) || [],
+    },
+    orderDetails: {
+      tableNumber: payload.tableNumber,
+      hasDeliveryAddress: !!payload.deliveryAddress,
+      deliveryAddress: payload.deliveryAddress?.substring(0, 50) + '...',
+      estimatedReadyTime: payload.estimatedReadyTime,
+    },
+    payloadKeys: Object.keys(payload),
+  });
+
+  // Validate required fields
+  const validationErrors = [];
+  if (!payload.orderId) validationErrors.push('orderId is missing');
+  if (!payload.totalPrice || payload.totalPrice <= 0) validationErrors.push('totalPrice is invalid');
+  if (!payload.orderType) validationErrors.push('orderType is missing');
+  if (!payload.items || payload.items.length === 0) validationErrors.push('items array is empty');
+
+  if (validationErrors.length > 0) {
+    this.logger.error(`❌ [${requestId}] Validation failed:`, {
+      orderId: payload.orderId,
+      errors: validationErrors,
+    });
     
-    try {
-      const result = await this.webhookService.sendNewOrderNotification(payload);
-      return { 
-        success: true, 
-        message: 'Order notification sent successfully',
-        orderId: payload.orderId,
-        result 
-      };
-    } catch (error) {
-      this.logger.error('Failed to send order notification:', error);
-      return { 
-        success: false, 
-        error: error.message,
-        orderId: payload.orderId 
-      };
-    }
+    return {
+      success: false,
+      error: 'Validation failed',
+      details: validationErrors,
+      orderId: payload.orderId,
+      requestId,
+    };
   }
+
+  try {
+    this.logger.log(`🔄 [${requestId}] Processing order notification...`);
+    
+    const result = await this.webhookService.sendNewOrderNotification(payload);
+    
+    this.logger.log(`✅ [${requestId}] Order notification processed successfully:`, {
+      orderId: payload.orderId,
+      sent: result.sent,
+      via: result.via,
+      messageId: result.messageId,
+      customerName: result.customerName,
+      itemsCount: result.itemsCount,
+    });
+
+    return { 
+      success: true, 
+      message: 'Order notification sent successfully',
+      orderId: payload.orderId,
+      requestId,
+      result: {
+        sent: result.sent,
+        via: result.via,
+        messageId: result.messageId,
+        customerName: result.customerName,
+        itemsCount: result.itemsCount,
+      }
+    };
+  } catch (error) {
+    this.logger.error(`❌ [${requestId}] Failed to send order notification:`, {
+      orderId: payload.orderId,
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+
+    return { 
+      success: false, 
+      error: error.message,
+      orderId: payload.orderId,
+      requestId,
+    };
+  }
+}
 
   // 2. ส่งรายงานยอดขาย (Gmail SMTP)
   @Post('sales-report')
