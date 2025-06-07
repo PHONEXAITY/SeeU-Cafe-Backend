@@ -2,6 +2,7 @@ import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
+import * as nodemailer from 'nodemailer';
 import { 
   OrderWebhookPayload, 
   SalesReportPayload, 
@@ -31,7 +32,8 @@ interface LineApiResponse {
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
-  private mailTransporter: any; // เปลี่ยนจาก nodemailer.Transporter เป็น any
+  private mailTransporter: nodemailer.Transporter | null = null;
+  private isTransporterInitialized = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -49,99 +51,124 @@ export class WebhookService {
     }, 1000); // รอ 1 วินาที
   }
 
-private async initializeMailTransporter() {
-  try {
-    const nodemailer = require('nodemailer');
-    
-    const emailHost = this.configService.get<string>('EMAIL_HOST');
-    const emailUser = this.configService.get<string>('EMAIL_USER');
-    const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
-    const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT') || '587');
-    
-    this.logger.log(`Initializing mail transporter: ${emailHost}:${emailPort}`);
-    
-    if (!emailHost || !emailUser || !emailPassword) {
-      this.logger.warn('Email configuration incomplete');
-      this.mailTransporter = null;
+ private async initializeMailTransporter() {
+    if (this.isTransporterInitialized) {
       return;
     }
 
-    this.mailTransporter = nodemailer.createTransport({
-      host: emailHost,
-      port: emailPort,
-      secure: false, // ใช้ STARTTLS แทน SSL
-      auth: {
-        user: emailUser,
-        pass: emailPassword,
-      },
-      tls: {
-        rejectUnauthorized: false,
-        ciphers: 'SSLv3'
-      },
-      debug: process.env.NODE_ENV === 'development',
-      logger: process.env.NODE_ENV === 'development',
-      connectionTimeout: 60000,
-      greetingTimeout: 30000,
-      socketTimeout: 60000,
-    });
-    
-    this.logger.log('Mail transporter created, testing connection...');
-    
-    await new Promise((resolve, reject) => {
-      this.mailTransporter.verify((error: any, success: any) => {
-        if (error) {
-          this.logger.error('SMTP connection failed:', error.message);
-          this.mailTransporter = null;
-          reject(error);
-        } else {
-          this.logger.log('✅ SMTP connection verified successfully');
-          resolve(success);
-        }
-      });
-    });
-    
-  } catch (error) {
-    this.logger.error('Failed to initialize mail transporter:', error);
-    this.mailTransporter = null;
-    
-    await this.initializeFallbackTransporter();
-  }
-}
-private async initializeFallbackTransporter() {
-  try {
-    const nodemailer = require('nodemailer');
-    
-    this.logger.log('🔄 Trying fallback transporter configuration...');
-    
-    this.mailTransporter = nodemailer.createTransport({
-      service: 'gmail', // ใช้ service แทน host/port
-      auth: {
-        user: this.configService.get<string>('EMAIL_USER'),
-        pass: this.configService.get<string>('EMAIL_PASSWORD'),
-      },
-      tls: {
-        rejectUnauthorized: false
+    try {
+      const emailHost = this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com');
+      const emailUser = this.configService.get<string>('EMAIL_USER');
+      const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
+      const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT', '587'));
+      
+      this.logger.log(`Initializing mail transporter: ${emailHost}:${emailPort}`);
+      
+      if (!emailHost || !emailUser || !emailPassword) {
+        this.logger.warn('Email configuration incomplete');
+        this.isTransporterInitialized = true;
+        return;
       }
-    });
-    
-    await new Promise((resolve, reject) => {
-      this.mailTransporter.verify((error: any, success: any) => {
-        if (error) {
-          this.logger.error('Fallback SMTP connection also failed:', error.message);
-          this.mailTransporter = null;
-          reject(error);
-        } else {
-          this.logger.log('✅ Fallback SMTP connection successful');
-          resolve(success);
-        }
+
+      // Primary configuration with proper TLS
+      this.mailTransporter = nodemailer.createTransporter({
+        host: emailHost,
+        port: emailPort,
+        secure: false, // Use STARTTLS for port 587
+        requireTLS: true, // Force TLS
+        auth: {
+          user: emailUser,
+          pass: emailPassword,
+        },
+        tls: {
+          rejectUnauthorized: false,
+          minVersion: 'TLSv1.2', // ✅ Use modern TLS
+          ciphers: 'ECDHE-RSA-AES256-GCM-SHA384', // ✅ Modern cipher
+          servername: emailHost,
+        },
+        pool: true, // Use connection pooling
+        maxConnections: 5,
+        maxMessages: 100,
+        connectionTimeout: 60000,
+        greetingTimeout: 30000,
+        socketTimeout: 60000,
+        debug: process.env.NODE_ENV === 'development',
+        logger: process.env.NODE_ENV === 'development',
       });
-    });
-    
-  } catch (error) {
-    this.logger.error('Fallback transporter also failed:', error);
-    this.mailTransporter = null;
+      
+      this.logger.log('Mail transporter created, testing connection...');
+      
+      // Test the connection
+      await this.mailTransporter.verify();
+      this.logger.log('✅ SMTP connection verified successfully');
+      this.isTransporterInitialized = true;
+      
+    } catch (error) {
+      this.logger.error('Primary SMTP configuration failed:', error.message);
+      await this.initializeFallbackTransporter();
+    }
   }
-}
+
+private async initializeFallbackTransporter() {
+    try {
+      this.logger.log('🔄 Trying fallback transporter (Gmail service)...');
+      
+      const emailUser = this.configService.get<string>('EMAIL_USER');
+      const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
+      
+      if (!emailUser || !emailPassword) {
+        this.logger.error('Email credentials not available for fallback');
+        this.isTransporterInitialized = true;
+        return;
+      }
+
+      this.mailTransporter = nodemailer.createTransporter({
+        service: 'gmail', // Use Gmail service preset
+        auth: {
+          user: emailUser,
+          pass: emailPassword,
+        },
+        tls: {
+          rejectUnauthorized: false
+        },
+        pool: true,
+        debug: process.env.NODE_ENV === 'development',
+        logger: process.env.NODE_ENV === 'development',
+      });
+      
+      await this.mailTransporter.verify();
+      this.logger.log('✅ Fallback SMTP connection successful');
+      this.isTransporterInitialized = true;
+      
+    } catch (error) {
+      this.logger.error('Fallback transporter also failed:', error.message);
+      this.mailTransporter = null;
+      this.isTransporterInitialized = true;
+    }
+  }
+
+  private async getWorkingTransporter(): Promise<nodemailer.Transporter | null> {
+    // Ensure transporter is initialized
+    if (!this.isTransporterInitialized) {
+      await this.initializeMailTransporter();
+    }
+
+    // If we have a working transporter, return it
+    if (this.mailTransporter) {
+      try {
+        await this.mailTransporter.verify();
+        return this.mailTransporter;
+      } catch (error) {
+        this.logger.warn('Existing transporter failed verification, recreating...');
+        this.mailTransporter = null;
+        this.isTransporterInitialized = false;
+        await this.initializeMailTransporter();
+        return this.mailTransporter;
+      }
+    }
+
+    return null;
+  }
 
 private async sendEmailDirect(mailOptions: any) {
   try {
@@ -176,36 +203,40 @@ private async sendEmailDirect(mailOptions: any) {
 
 
 private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      this.logger.log(`📧 Sending email (attempt ${attempt}/${maxRetries})...`);
-      
-      if (this.mailTransporter) {
-        try {
-          const result = await this.mailTransporter.sendMail(mailOptions);
-          this.logger.log(`✅ Email sent successfully via transporter on attempt ${attempt}`);
-          return result;
-        } catch (transporterError) {
-          this.logger.warn(`Transporter failed on attempt ${attempt}, trying direct method...`);
-          this.mailTransporter = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.log(`📧 Sending email (attempt ${attempt}/${maxRetries})...`);
+        
+        const transporter = await this.getWorkingTransporter();
+        
+        if (!transporter) {
+          throw new Error('No working email transporter available');
         }
+
+        const result = await transporter.sendMail(mailOptions);
+        this.logger.log(`✅ Email sent successfully on attempt ${attempt}`, {
+          messageId: result.messageId,
+          to: mailOptions.to,
+          subject: mailOptions.subject
+        });
+        return result;
+        
+      } catch (error) {
+        this.logger.error(`❌ Email sending attempt ${attempt} failed:`, error.message);
+        
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        
+        // Reset transporter for next attempt
+        this.mailTransporter = null;
+        this.isTransporterInitialized = false;
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
       }
-      
-      const result = await this.sendEmailDirect(mailOptions);
-      this.logger.log(`✅ Email sent successfully via direct method on attempt ${attempt}`);
-      return result;
-      
-    } catch (error) {
-      this.logger.error(`❌ Email sending attempt ${attempt} failed:`, error.message);
-      
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
     }
   }
-}
 
  async sendNewOrderNotification(payload: OrderWebhookPayload): Promise<WebhookNotificationResult> {
     const requestId = Date.now().toString();
@@ -231,35 +262,35 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
 
     const itemsList = payload.items?.map(item => 
       `• ${item.name} x${item.quantity} (฿${item.price.toLocaleString()})`
-    ).join('\n') || '• ไม่มีรายการสินค้า';
+    ).join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
 
-    const customerName = payload.customerInfo?.name || 'ลูกค้า';
-    const customerPhone = payload.customerInfo?.phone || 'ไม่ระบุ';
+    const customerName = payload.customerInfo?.name || 'ລູກຄ້າ';
+    const customerPhone = payload.customerInfo?.phone || 'ບໍ່ລະບຸ';
 
     const isTestOrder = payload.orderId?.toString().includes('TEST');
     const orderTypeText = this.getOrderTypeText(payload.orderType);
     
     let message = `🔔 *ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''}*
-📋 รหัส: ${payload.orderId}
-💰 ยอดรวม: ฿${payload.totalPrice.toLocaleString()}
-📱 ประเภท: ${orderTypeText}
-👤 ลูกค้า: ${customerName}
-📞 เบอร์: ${customerPhone}`;
+📋 ລະຫັດ: ${payload.orderId}
+💰 ຍອດລວມ: ฿${payload.totalPrice.toLocaleString()}
+📱 ປະເພດ: ${orderTypeText}
+👤 ລູກຄ້າ: ${customerName}
+📞 ເບີໂທ: ${customerPhone}`;
 
     if (payload.tableNumber) {
-      message += `\n🪑 โต๊ะ: ${payload.tableNumber}`;
+      message += `\n🪑 ໂຕະ: ${payload.tableNumber}`;
     }
     
     if (payload.deliveryAddress) {
-      message += `\n🚚 ที่อยู่: ${payload.deliveryAddress}`;
+      message += `\n🚚 ທີ່ຢູ່: ${payload.deliveryAddress}`;
     }
 
-    message += `\n\n📝 รายการ:\n${itemsList}`;
+    message += `\n\n📝 ລາຍການ:\n${itemsList}`;
 
     if (payload.estimatedReadyTime) {
       try {
         const readyTime = new Date(payload.estimatedReadyTime);
-        message += `\n\n⏰ เวลาเสร็จโดยประมาณ: ${readyTime.toLocaleTimeString('th-TH', { 
+        message += `\n\n⏰ ເວລາແລ້ວໂດຍປະມານ: ${readyTime.toLocaleTimeString('th-TH', { 
           hour: '2-digit', 
           minute: '2-digit' 
         })}`;
@@ -268,7 +299,7 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
       }
     }
 
-    message += `\n\n${isTestOrder ? '🧪 นี่คือการทดสอบระบบ' : '✅ กรุณาเตรียมออเดอร์'}`;
+    message += `\n\n${isTestOrder ? '🧪 ນີ້ແມ່ນການທົດສອບລະບົບ' : '✅ ກະລຸນາກຽມອໍເດີ້'}`;
 
     try {
       this.logger.log(`[${requestId}] Sending to Line API...`);
@@ -326,113 +357,113 @@ private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
   return await this.sendNewOrderNotification(payload);
 }
 private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload): Promise<WebhookNotificationResult> {
-  const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
-                    this.configService.get<string>('EMAIL_USER');
+    const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
+                      this.configService.get<string>('EMAIL_USER');
 
-  if (!adminEmail) {
-    this.logger.warn('No admin email configured for fallback notification');
-    return { 
-      sent: false, 
-      via: 'email',
-      reason: 'No admin email configured',
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  const orderData = payload ? {
-    order_id: payload.orderId,
-    total_price: payload.totalPrice,
-    order_type: payload.orderType,
-    user: {
-      first_name: payload.customerInfo?.name?.split(' ')[0] || '',
-      last_name: payload.customerInfo?.name?.split(' ').slice(1).join(' ') || '',
-      phone: payload.customerInfo?.phone || '',
-    },
-    order_details: payload.items || [],
-    table: payload.tableNumber ? { number: payload.tableNumber } : null,
-    delivery: payload.deliveryAddress ? { delivery_address: payload.deliveryAddress } : null,
-  } : order;
-
-  const itemsList = (payload?.items || order?.order_details || []).map(detail => {
-    if (payload?.items) {
-      return `<li>${detail.name} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
-    } else {
-      const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-      return `<li>${itemName} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+    if (!adminEmail) {
+      this.logger.warn('No admin email configured for fallback notification');
+      return { 
+        sent: false, 
+        via: 'email',
+        reason: 'No admin email configured',
+        timestamp: new Date().toISOString()
+      };
     }
-  }).join('');
 
-  const isTestOrder = orderData.order_id?.toString().includes('TEST');
-  const customerName = orderData.user?.first_name || 'ไม่ระบุ';
+    const orderData = payload ? {
+      order_id: payload.orderId,
+      total_price: payload.totalPrice,
+      order_type: payload.orderType,
+      user: {
+        first_name: payload.customerInfo?.name?.split(' ')[0] || '',
+        last_name: payload.customerInfo?.name?.split(' ').slice(1).join(' ') || '',
+        phone: payload.customerInfo?.phone || '',
+      },
+      order_details: payload.items || [],
+      table: payload.tableNumber ? { number: payload.tableNumber } : null,
+      delivery: payload.deliveryAddress ? { delivery_address: payload.deliveryAddress } : null,
+    } : order;
 
-  const emailHtml = `
-  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <h2 style="color: #2c3e50;">🔔 ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''}!</h2>
-    
-    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-      <p><strong>รหัสออเดอร์:</strong> ${orderData.order_id}</p>
-      <p><strong>ยอดรวม:</strong> ฿${orderData.total_price.toLocaleString()}</p>
-      <p><strong>ประเภท:</strong> ${this.getOrderTypeText(orderData.order_type)}</p>
-      <p><strong>ลูกค้า:</strong> ${customerName} ${orderData.user?.last_name || ''}</p>
-      <p><strong>เบอร์:</strong> ${orderData.user?.phone || 'ไม่ระบุ'}</p>
-      ${orderData.table ? `<p><strong>โต๊ะ:</strong> ${orderData.table.number}</p>` : ''}
-      ${orderData.delivery ? `<p><strong>ที่อยู่จัดส่ง:</strong> ${orderData.delivery.delivery_address}</p>` : ''}
+    const itemsList = (payload?.items || order?.order_details || []).map(detail => {
+      if (payload?.items) {
+        return `<li>${detail.name} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+      } else {
+        const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
+        return `<li>${itemName} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+      }
+    }).join('');
+
+    const isTestOrder = orderData.order_id?.toString().includes('TEST');
+    const customerName = orderData.user?.first_name || 'ไม่ระบุ';
+
+    const emailHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #2c3e50;">🔔 ອໍເດີ້ໃໝ່${isTestOrder ? ' (TEST)' : ''}!</h2>
+      
+      <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <p><strong>ລະຫັດອໍເດີ້:</strong> ${orderData.order_id}</p>
+        <p><strong>ຍອດລວມ:</strong> ฿${orderData.total_price.toLocaleString()}</p>
+        <p><strong>ປະເພດ:</strong> ${this.getOrderTypeText(orderData.order_type)}</p>
+        <p><strong>ລູກຄ້າ:</strong> ${customerName} ${orderData.user?.last_name || ''}</p>
+        <p><strong>ເບີໂທ:</strong> ${orderData.user?.phone || 'ไม่ระบุ'}</p>
+        ${orderData.table ? `<p><strong>ໂຕະ:</strong> ${orderData.table.number}</p>` : ''}
+        ${orderData.delivery ? `<p><strong>ທີ່ຢູ່ຈັດສົ່ງ:</strong> ${orderData.delivery.delivery_address}</p>` : ''}
+      </div>
+
+      <h3>ລາຍການສິນຄ້າ:</h3>
+      <ul style="list-style-type: none; padding: 0;">
+        ${itemsList}
+      </ul>
+      
+      <p style="color: #e74c3c; font-weight: bold;">
+        ${isTestOrder ? '🧪 ນີ່ແມ່ນການທົດສອບລະບົບ' : 'ກະລຸນາກຽມອໍເດີ້'}
+      </p>
+      
+      <p style="color: #f39c12;"><em>ສົ່ງຜ່ານ Email (Line API ບໍ່ສາມາດໃຊ້ງານໄດ້)</em></p>
     </div>
+    `;
 
-    <h3>รายการสินค้า:</h3>
-    <ul style="list-style-type: none; padding: 0;">
-      ${itemsList}
-    </ul>
-    
-    <p style="color: #e74c3c; font-weight: bold;">
-      ${isTestOrder ? '🧪 นี่คือการทดสอบระบบ' : 'กรุณาเตรียมออเดอร์'}
-    </p>
-    
-    <p style="color: #f39c12;"><em>ส่งผ่าน Email (Line API ไม่สามารถใช้งานได้)</em></p>
-  </div>
-  `;
-
-  const mailOptions = {
-    from: this.configService.get<string>('EMAIL_FROM'),
-    to: adminEmail,
-    subject: `🔔 ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''} - ${orderData.order_id}`,
-    html: emailHtml
-  };
-
-  try {
-    const result = await this.sendEmailWithRetry(mailOptions);
-    
-    return { 
-      sent: true, 
-      via: 'email',
-      messageId: result.messageId,
-      customerName,
-      itemsCount: payload?.items?.length || 0,
-      fallbackReason: 'Line API not available',
-      timestamp: new Date().toISOString()
+    const mailOptions = {
+      from: this.configService.get<string>('EMAIL_FROM'),
+      to: adminEmail,
+      subject: `🔔 ອໍເດີ້ໃໝ່${isTestOrder ? ' (TEST)' : ''} - ${orderData.order_id}`,
+      html: emailHtml
     };
-  } catch (error) {
-    this.logger.error('Failed to send notification email after all retries:', error);
-    return { 
-      sent: false, 
-      via: 'email',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    };
+
+    try {
+      const result = await this.sendEmailWithRetry(mailOptions);
+      
+      return { 
+        sent: true, 
+        via: 'email',
+        messageId: result.messageId,
+        customerName,
+        itemsCount: payload?.items?.length || 0,
+        fallbackReason: 'Line API not available',
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      this.logger.error('Failed to send notification email after all retries:', error);
+      return { 
+        sent: false, 
+        via: 'email',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
+    }
   }
-}
 
 private getOrderTypeText(orderType: string): string {
   switch (orderType) {
-    case 'pickup': return 'รับเอง';
-    case 'delivery': return 'จัดส่ง';
-    case 'table': return 'ทานที่ร้าน';
-    case 'dine-in': return 'ทานที่ร้าน';
+    case 'pickup': return 'ຮັບເອງ';
+    case 'delivery': return 'ຈັດສົ່ງ';
+    case 'table': return 'ກິນທີ່ຮ້ານ';
+    case 'dine-in': return 'ກິນທີ່ຮ້ານ';
     default: return orderType;
   }
 }
 
-  async sendSalesReport(payload: SalesReportPayload) {
+async sendSalesReport(payload: SalesReportPayload) {
     this.logger.log(`Generating sales report: ${payload.reportType}`);
     
     try {
@@ -471,74 +502,26 @@ private getOrderTypeText(orderType: string): string {
         throw new Error('Admin email not configured');
       }
 
-      try {
-        const nodemailer = require('nodemailer');
-        const directTransporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 587,
-          secure: false,
-          auth: {
-            user: 'phoneyang1@gmail.com',
-            pass: 'sdzq dbrm xivu nujp'
-          }
-        });
+      const emailHtml = this.generateSalesReportHtml(reportData, payload.reportType);
+      
+      const mailOptions = {
+        from: this.configService.get<string>('EMAIL_FROM'),
+        to: adminEmail,
+        subject: `📊 ລາຍງານຍອດຂາຍ${this.getReportTypeText(payload.reportType)} - ${new Date().toLocaleDateString('th-TH')}`,
+        html: emailHtml
+      };
 
-        const emailHtml = this.generateSalesReportHtml(reportData, payload.reportType);
-        
-        const mailOptions = {
-          from: 'phoneyang1@gmail.com',
-          to: adminEmail,
-          subject: `📊 รายงานยอดขาย${this.getReportTypeText(payload.reportType)} - ${new Date().toLocaleDateString('th-TH')}`,
-          html: emailHtml
-        };
-
-        const result = await directTransporter.sendMail(mailOptions);
-        
-        return { 
-          sent: true, 
-          via: 'direct-nodemailer',
-          messageId: result.messageId,
-          reportType: payload.reportType,
-          totalSales: reportData.totalSales,
-          totalOrders: reportData.totalOrders,
-          timestamp: new Date().toISOString()
-        };
-      } catch (directError) {
-        this.logger.error('Direct nodemailer failed:', directError);
-        
-        if (!this.mailTransporter) {
-          this.logger.warn('Mail transporter not available, returning report data only');
-          return { 
-            sent: false, 
-            reason: 'Mail transporter not available',
-            reportType: payload.reportType,
-            totalSales: reportData.totalSales,
-            totalOrders: reportData.totalOrders,
-            reportData: reportData,
-            timestamp: new Date().toISOString()
-          };
-        }
-
-        const emailHtml = this.generateSalesReportHtml(reportData, payload.reportType);
-        
-        const mailOptions = {
-          from: this.configService.get<string>('EMAIL_FROM'),
-          to: adminEmail,
-          subject: `📊 รายงานยอดขาย${this.getReportTypeText(payload.reportType)} - ${new Date().toLocaleDateString('th-TH')}`,
-          html: emailHtml
-        };
-
-        const result = await this.mailTransporter.sendMail(mailOptions);
-        
-        return { 
-          sent: true, 
-          messageId: result.messageId,
-          reportType: payload.reportType,
-          totalSales: reportData.totalSales,
-          totalOrders: reportData.totalOrders,
-          timestamp: new Date().toISOString()
-        };
-      }
+      const result = await this.sendEmailWithRetry(mailOptions);
+      
+      return { 
+        sent: true, 
+        via: 'email',
+        messageId: result.messageId,
+        reportType: payload.reportType,
+        totalSales: reportData.totalSales,
+        totalOrders: reportData.totalOrders,
+        timestamp: new Date().toISOString()
+      };
     } catch (error) {
       this.logger.error('Failed to send sales report email:', error);
       throw new HttpException(
@@ -567,23 +550,23 @@ private getOrderTypeText(orderType: string): string {
 
     const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #27ae60;">🎫 รหัสรับสินค้า</h2>
+      <h2 style="color: #27ae60;">🎫 ລະຫັດຮັບສິນຄ້າ</h2>
       
       <div style="background: #f8f9fa; padding: 30px; text-align: center; border-radius: 8px; margin: 20px 0;">
         <h1 style="color: #2c3e50; font-size: 48px; margin: 0;">${order.pickup_code || 'N/A'}</h1>
-        <p style="color: #7f8c8d; margin-top: 10px;">รหัสรับสินค้า</p>
+        <p style="color: #7f8c8d; margin-top: 10px;">ລະຫັດຮັບສິນຄ້າ</p>
       </div>
 
       <div style="background: #ecf0f1; padding: 20px; border-radius: 8px;">
-        <p><strong>ออเดอร์:</strong> ${order.order_id}</p>
-        <p><strong>ยอดรวม:</strong> ฿${order.total_price.toLocaleString()}</p>
-        <p><strong>ประเภท:</strong> ${order.order_type}</p>
+        <p><strong>ອໍເດີ້:</strong> ${order.order_id}</p>
+        <p><strong>ຍອດລວມ:</strong> ฿${order.total_price.toLocaleString()}</p>
+        <p><strong>ປະເພດ:</strong> ${order.order_type}</p>
       </div>
 
       <p style="margin-top: 20px; color: #e74c3c;">
-        <strong>วิธีรับสินค้า:</strong><br>
-        1. แสดงรหัสนี้ที่เคาน์เตอร์<br>
-        2. หรือบอกรหัส ${order.pickup_code || 'N/A'} กับเจ้าหน้าที่
+        <strong>ວິທີຮັບສິນຄ້າ:</strong><br>
+        1. ສະແດງລະຫັດນີ້ທີ່ເຄົາເຕີ້<br>
+        2. ຫຼືບອກລະຫັດ ${order.pickup_code || 'N/A'} ກັບພະນັກງານ
       </p>
     </div>
     `;
@@ -591,7 +574,7 @@ private getOrderTypeText(orderType: string): string {
     const mailOptions = {
       from: 'phoneyang1@gmail.com',
       to: order.user.email,
-      subject: `🎫 รหัสรับสินค้า - ออเดอร์ ${order.order_id}`,
+      subject: `🎫 ລະຫັດຮັບສິນຄ້າ - ອໍເດີ້ ${order.order_id}`,
       html: emailHtml
     };
 
@@ -666,22 +649,22 @@ private getOrderTypeText(orderType: string): string {
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <div style="text-align: center; margin-bottom: 30px;">
         <h1>SeeU Cafe</h1>
-        <h2>ใบเสร็จรับเงิน</h2>
+        <h2>ໃບບິນຮັບເງີນ</h2>
       </div>
       
       <div style="margin-bottom: 20px;">
-        <p><strong>ออเดอร์:</strong> ${order.order_id}</p>
-        <p><strong>วันที่:</strong> ${order.create_at.toLocaleDateString('th-TH')}</p>
-        <p><strong>ลูกค้า:</strong> ${order.user.first_name} ${order.user.last_name || ''}</p>
+        <p><strong>ອໍເດີ້:</strong> ${order.order_id}</p>
+        <p><strong>ວັນທີ່:</strong> ${order.create_at.toLocaleDateString('th-TH')}</p>
+        <p><strong>ລູກຄ້າ:</strong> ${order.user.first_name} ${order.user.last_name || ''}</p>
         ${order.table ? `<p><strong>โต๊ะ:</strong> ${order.table.number}</p>` : ''}
       </div>
       
       <table style="width: 100%; border-collapse: collapse;">
         <thead>
           <tr style="background-color: #f8f9fa;">
-            <th style="padding: 8px; border-bottom: 1px solid #ddd;">รายการ</th>
-            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 80px;">จำนวน</th>
-            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 100px;">ราคา</th>
+            <th style="padding: 8px; border-bottom: 1px solid #ddd;">ລາຍການ</th>
+            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 80px;">ຈຳນວນ</th>
+            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 100px;">ລາຄາ</th>
           </tr>
         </thead>
         <tbody>
@@ -694,7 +677,7 @@ private getOrderTypeText(orderType: string): string {
       </div>
       
       <div style="margin-top: 30px; text-align: center; color: #666;">
-        <p>ขอบคุณที่ใช้บริการ</p>
+        <p>ຂອບໃຈທີ່ໃຊ້ບໍລິການ</p>
         <p>SeeU Cafe</p>
       </div>
     </div>
@@ -703,7 +686,7 @@ private getOrderTypeText(orderType: string): string {
     const mailOptions = {
       from: 'phoneyang1@gmail.com',
       to: order.user.email,
-      subject: `🧾 ใบเสร็จ - ออเดอร์ ${order.order_id}`,
+      subject: `🧾 ໃບບິນ - ອໍເດີ້ ${order.order_id}`,
       html: emailHtml
     };
 
@@ -826,22 +809,22 @@ private getOrderTypeText(orderType: string): string {
 
     return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #2c3e50;">📊 รายงานยอดขาย${this.getReportTypeText(reportType)}</h2>
+      <h2 style="color: #2c3e50;">📊 ລາຍງານຍອດຂາຍ${this.getReportTypeText(reportType)}</h2>
       
       <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-        <h3 style="color: #27ae60;">สรุปยอดขาย</h3>
-        <p><strong>ยอดขายรวม:</strong> ฿${data.totalSales.toLocaleString()}</p>
-        <p><strong>จำนวนออเดอร์:</strong> ${data.totalOrders} ออเดอร์</p>
-        <p><strong>ยอดขายเฉลี่ย:</strong> ฿${data.totalOrders > 0 ? (data.totalSales / data.totalOrders).toLocaleString() : 0} ต่อออเดอร์</p>
+        <h3 style="color: #27ae60;">ສະຫຼູບຍອດຂາຍ</h3>
+        <p><strong>ຍອດຂາຍລວມ:</strong> ฿${data.totalSales.toLocaleString()}</p>
+        <p><strong>ຈຳນວນອໍເດີ້:</strong> ${data.totalOrders} ອໍເດີ້</p>
+        <p><strong>ຍອດຂາຍສະເລ່ຍ:</strong> ฿${data.totalOrders > 0 ? (data.totalSales / data.totalOrders).toLocaleString() : 0} ຕໍ່ອໍເດີ້</p>
       </div>
 
       <div style="background: #ecf0f1; padding: 20px; border-radius: 8px;">
-        <h3 style="color: #e74c3c;">สินค้าขายดี Top 5</h3>
+        <h3 style="color: #e74c3c;">ສິນຄ້າຂາຍດີ Top 5</h3>
         <ol>${topItemsList}</ol>
       </div>
       
       <p style="margin-top: 20px; color: #7f8c8d; font-size: 12px;">
-        รายงานสร้างเมื่อ: ${new Date().toLocaleString('th-TH')}
+        ລາຍງານສ້າງເມື່ອ: ${new Date().toLocaleString('th-TH')}
       </p>
     </div>
     `;
@@ -849,9 +832,9 @@ private getOrderTypeText(orderType: string): string {
 
   private getReportTypeText(type: string) {
     switch (type) {
-      case 'daily': return 'รายวัน';
-      case 'weekly': return 'รายสัปดาห์';
-      case 'monthly': return 'รายเดือน';
+      case 'daily': return 'ລາຍ';
+      case 'weekly': return 'ລາຍອາທິດ';
+      case 'monthly': return 'ລາຍເດືອນ';
       default: return '';
     }
   }
