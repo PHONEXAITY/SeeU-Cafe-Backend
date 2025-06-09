@@ -261,7 +261,7 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     }
 
     const itemsList = payload.items?.map(item => 
-      `• ${item.name} x${item.quantity} (฿${item.price.toLocaleString()})`
+      `• ${item.name} x${item.quantity} (₭${item.price.toLocaleString()})`
     ).join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
 
     const customerName = payload.customerInfo?.name || 'ລູກຄ້າ';
@@ -270,9 +270,9 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     const isTestOrder = payload.orderId?.toString().includes('TEST');
     const orderTypeText = this.getOrderTypeText(payload.orderType);
     
-    let message = `🔔 *ออเดอร์ใหม่${isTestOrder ? ' (TEST)' : ''}*
+    let message = `🔔 *ອໍເດີ້ໃໝ່${isTestOrder ? ' (TEST)' : ''}*
 📋 ລະຫັດ: ${payload.orderId}
-💰 ຍອດລວມ: ฿${payload.totalPrice.toLocaleString()}
+💰 ຍອດລວມ: ₭${payload.totalPrice.toLocaleString()}
 📱 ປະເພດ: ${orderTypeText}
 👤 ລູກຄ້າ: ${customerName}
 📞 ເບີໂທ: ${customerPhone}`;
@@ -386,10 +386,10 @@ private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPaylo
 
     const itemsList = (payload?.items || order?.order_details || []).map(detail => {
       if (payload?.items) {
-        return `<li>${detail.name} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+        return `<li>${detail.name} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
       } else {
         const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-        return `<li>${itemName} x${detail.quantity} - ฿${detail.price.toLocaleString()}</li>`;
+        return `<li>${itemName} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
       }
     }).join('');
 
@@ -402,7 +402,7 @@ private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPaylo
       
       <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <p><strong>ລະຫັດອໍເດີ້:</strong> ${orderData.order_id}</p>
-        <p><strong>ຍອດລວມ:</strong> ฿${orderData.total_price.toLocaleString()}</p>
+        <p><strong>ຍອດລວມ:</strong> ₭${orderData.total_price.toLocaleString()}</p>
         <p><strong>ປະເພດ:</strong> ${this.getOrderTypeText(orderData.order_type)}</p>
         <p><strong>ລູກຄ້າ:</strong> ${customerName} ${orderData.user?.last_name || ''}</p>
         <p><strong>ເບີໂທ:</strong> ${orderData.user?.phone || 'ไม่ระบุ'}</p>
@@ -559,7 +559,7 @@ async sendSalesReport(payload: SalesReportPayload) {
 
       <div style="background: #ecf0f1; padding: 20px; border-radius: 8px;">
         <p><strong>ອໍເດີ້:</strong> ${order.order_id}</p>
-        <p><strong>ຍອດລວມ:</strong> ฿${order.total_price.toLocaleString()}</p>
+        <p><strong>ຍອດລວມ:</strong> ₭${order.total_price.toLocaleString()}</p>
         <p><strong>ປະເພດ:</strong> ${order.order_type}</p>
       </div>
 
@@ -640,7 +640,7 @@ async sendSalesReport(payload: SalesReportPayload) {
       <tr>
         <td>${itemName}</td>
         <td style="text-align: center;">${detail.quantity}</td>
-        <td style="text-align: right;">฿${detail.price.toLocaleString()}</td>
+        <td style="text-align: right;">₭${detail.price.toLocaleString()}</td>
       </tr>
       `;
     }).join('');
@@ -656,7 +656,7 @@ async sendSalesReport(payload: SalesReportPayload) {
         <p><strong>ອໍເດີ້:</strong> ${order.order_id}</p>
         <p><strong>ວັນທີ່:</strong> ${order.create_at.toLocaleDateString('th-TH')}</p>
         <p><strong>ລູກຄ້າ:</strong> ${order.user.first_name} ${order.user.last_name || ''}</p>
-        ${order.table ? `<p><strong>โต๊ะ:</strong> ${order.table.number}</p>` : ''}
+        ${order.table ? `<p><strong>ໂຕະ:</strong> ${order.table.number}</p>` : ''}
       </div>
       
       <table style="width: 100%; border-collapse: collapse;">
@@ -673,7 +673,7 @@ async sendSalesReport(payload: SalesReportPayload) {
       </table>
       
       <div style="margin-top: 20px; text-align: right;">
-        <p style="font-weight: bold; font-size: 16px;">ยอดรวม: ฿${order.total_price.toLocaleString()}</p>
+        <p style="font-weight: bold; font-size: 16px;">ຍອດລວມ: ₭${order.total_price.toLocaleString()}</p>
       </div>
       
       <div style="margin-top: 30px; text-align: center; color: #666;">
@@ -813,9 +813,9 @@ async sendSalesReport(payload: SalesReportPayload) {
       
       <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
         <h3 style="color: #27ae60;">ສະຫຼູບຍອດຂາຍ</h3>
-        <p><strong>ຍອດຂາຍລວມ:</strong> ฿${data.totalSales.toLocaleString()}</p>
+        <p><strong>ຍອດຂາຍລວມ:</strong> ₭${data.totalSales.toLocaleString()}</p>
         <p><strong>ຈຳນວນອໍເດີ້:</strong> ${data.totalOrders} ອໍເດີ້</p>
-        <p><strong>ຍອດຂາຍສະເລ່ຍ:</strong> ฿${data.totalOrders > 0 ? (data.totalSales / data.totalOrders).toLocaleString() : 0} ຕໍ່ອໍເດີ້</p>
+        <p><strong>ຍອດຂາຍສະເລ່ຍ:</strong> ₭${data.totalOrders > 0 ? (data.totalSales / data.totalOrders).toLocaleString() : 0} ຕໍ່ອໍເດີ້</p>
       </div>
 
       <div style="background: #ecf0f1; padding: 20px; border-radius: 8px;">

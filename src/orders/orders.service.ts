@@ -559,7 +559,7 @@ private validateWebhookPayload(payload: any, webhookType: string) {
 
           try {
             await this.customerNotificationsService.create({
-              message: `โต๊ะ #${table.number} มีลูกค้านั่งแล้ว - ออเดอร์ #${uniqueOrderId}`,
+              message: `ໂຕະ #${table.number} ມີລູກຄ້ານັ່ງແລ້ວ - ອໍເດີ້ #${uniqueOrderId}`,
               type: 'table_occupied',
               order_id: order.id,
               target_roles: ['admin', 'employee'],
@@ -755,7 +755,7 @@ private validateWebhookPayload(payload: any, webhookType: string) {
     console.log('🚀 [ORDER_CREATE] Attempting to send webhook...');
     
      try {
-     /*  const lineResult = await this.sendLineNotificationDirect(createdOrder); */
+      const lineResult = await this.sendLineNotificationDirect(createdOrder);
       
     } catch (lineError) {
       console.error('❌ [ORDER_CREATE] Line notification exception:', {
@@ -800,14 +800,14 @@ private validateWebhookPayload(payload: any, webhookType: string) {
 
     const itemsList = orderData.order_details?.map(detail => {
       const itemName = detail.food_menu?.name || detail.beverage_menu?.name || 'ບໍ່ລະບຸຊື່';
-      return `• ${itemName} x${detail.quantity} (฿${detail.price.toLocaleString()})`;
+      return `• ${itemName} x${detail.quantity} (₭${detail.price.toLocaleString()})`;
     }).join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
 
     const orderTypeText = this.getOrderTypeText(orderData.order_type);
     
     let message = `🔔 *ອໍເດີ້ໃໝ່!*
 📋 ລະຫັດ: ${orderData.order_id}
-💰 ຍອດລວມ: ฿${orderData.total_price.toLocaleString()}
+💰 ຍອດລວມ: ₭${orderData.total_price.toLocaleString()}
 📱 ປະເພດ: ${orderTypeText}
 👤 ລູກຄ້າ: ${customerName}
 📞 ເບີໂທ: ${orderData.user?.phone || 'ບໍ່ລະບຸ'}`;
@@ -925,7 +925,7 @@ private getOrderTypeText(orderType: string): string {
 
         try {
           await this.customerNotificationsService.create({
-            message: `โต๊ะ #${table.number} ว่างแล้ว - ออเดอร์ #${order.order_id} เสร็จสิ้น`,
+            message: `ໂຕະ #${table.number} ຫວ່າງແລ້ວ - ອໍເດີ້ #${order.order_id} ສຳເລັດ`,
             type: 'table_available',
             order_id: orderId,
             target_roles: ['admin', 'employee'],

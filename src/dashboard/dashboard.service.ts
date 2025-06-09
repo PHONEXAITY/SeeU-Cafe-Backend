@@ -519,7 +519,7 @@ export class DashboardService {
           item: product?.name || 'Unknown Item',
           date: order.create_at.toISOString(),
           table: order.table?.number?.toString() || 'N/A',
-          price: `฿${order.total_price?.toFixed(2) || '0.00'}`,
+          price: `₭${order.total_price?.toFixed(2) || '0.00'}`,
           payment: payment?.method || 'N/A',
           status: order.status,
           customer: order.user
