@@ -18,6 +18,7 @@ import { DeliveriesService } from './deliveries.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
+import { SimpleDeliveryFeeService } from './services/simple-delivery-fee.service';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { QueryDeliveryDto } from './dto/query-delivery.dto';
@@ -102,7 +103,9 @@ class PaginatedDeliveryResponseDto {
 @ApiBearerAuth()
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class DeliveriesController {
-  constructor(private readonly deliveriesService: DeliveriesService) {}
+  constructor(
+    private readonly deliveriesService: DeliveriesService, 
+    private readonly simpleDeliveryFeeService: SimpleDeliveryFeeService) {}
 
   @Post()
   @UseGuards(RolesGuard)
@@ -569,7 +572,103 @@ export class DeliveriesController {
       onTimeDeliveryRate: null,
     };
   }
-  @Post('calculate-fee')
+
+  @Get('settings/delivery-fee')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({
+  summary: 'Get delivery fee settings',
+  description: 'Retrieve current delivery fee configuration'
+})
+@ApiOkResponse({
+  description: 'Delivery fee settings retrieved successfully',
+  schema: {
+    type: 'object',
+    properties: {
+      baseFee: { type: 'number', example: 6000 },
+      perKmFee: { type: 'number', example: 2000 },
+      freeDistance: { type: 'number', example: 3 },
+      restaurantLat: { type: 'number', example: 19.8845 },
+      restaurantLng: { type: 'number', example: 102.135 }
+    }
+  }
+})
+async getDeliveryFeeSettings() {
+  return await this.simpleDeliveryFeeService.getDeliverySettings();
+}
+
+@Patch('settings/delivery-fee')
+@UseGuards(RolesGuard)
+@Roles('admin')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({
+  summary: 'Update delivery fee settings',
+  description: 'Update delivery fee configuration (Admin only)'
+})
+@ApiBody({
+  schema: {
+    type: 'object',
+    properties: {
+      baseFee: { type: 'number', example: 6000, description: 'Base delivery fee in LAK' },
+      perKmFee: { type: 'number', example: 2000, description: 'Fee per kilometer in LAK' },
+      freeDistance: { type: 'number', example: 3, description: 'Free delivery distance in KM' },
+      restaurantLat: { type: 'number', example: 19.8845, description: 'Restaurant latitude' },
+      restaurantLng: { type: 'number', example: 102.135, description: 'Restaurant longitude' }
+    }
+  }
+})
+async updateDeliveryFeeSettings(@Body() settings: {
+  baseFee?: number;
+  perKmFee?: number;
+  freeDistance?: number;
+  restaurantLat?: number;
+  restaurantLng?: number;
+}) {
+  return await this.simpleDeliveryFeeService.updateDeliverySettings(settings);
+}
+@Post('calculate-fee')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({
+  summary: 'Calculate delivery fee',
+  description: 'Calculate delivery fee based on customer location'
+})
+@ApiBody({
+  schema: {
+    type: 'object',
+    properties: {
+      customer_latitude: { type: 'number', example: 19.8845 },
+      customer_longitude: { type: 'number', example: 102.135 },
+    },
+    required: ['customer_latitude', 'customer_longitude'],
+  },
+})
+async calculateDeliveryFee(
+  @Body()
+  locationDto: {
+    customer_latitude: number;
+    customer_longitude: number;
+  },
+) {
+  const result = await this.simpleDeliveryFeeService.calculateDeliveryFee(
+    locationDto.customer_latitude,
+    locationDto.customer_longitude
+  );
+
+  return {
+    distance_meters: Math.round(result.distance * 1000),
+    distance_km: result.distance.toFixed(1),
+    estimated_time_minutes: result.estimatedTime,
+    delivery_fee_lak: result.deliveryFee,
+    is_within_delivery_area: result.isWithinDeliveryArea,
+    formatted_fee: `${result.deliveryFee.toLocaleString()} LAK`,
+    breakdown: {
+      base_fee: result.breakdown.baseFee,
+      distance_fee: result.breakdown.distanceFee,
+      free_distance_km: result.breakdown.freeDistance,
+      chargeable_distance: Math.max(0, result.distance - result.breakdown.freeDistance)
+    }
+  };
+}
+/*   @Post('calculate-fee')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate delivery fee',
@@ -623,5 +722,5 @@ export class DeliveriesController {
       is_within_delivery_area: deliveryInfo.isWithinDeliveryArea,
       formatted_fee: `${deliveryInfo.deliveryFee.toLocaleString()} LAK`,
     };
-  }
+  } */
 }

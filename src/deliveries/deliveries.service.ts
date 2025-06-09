@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CustomerNotificationsService } from '../customer-notifications/customer-notifications.service';
 import { CreateDeliveryDto } from './dto/create-delivery.dto';
 import { LocationService } from './services/location.service';
+import { SimpleDeliveryFeeService } from './services/simple-delivery-fee.service';
 import { UpdateDeliveryDto } from './dto/update-delivery.dto';
 import { UpdateDeliveryTimeDto } from './dto/update-delivery-time.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
@@ -53,9 +54,10 @@ export class DeliveriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly customerNotificationsService: CustomerNotificationsService,
+    private readonly simpleDeliveryFeeService: SimpleDeliveryFeeService,
   ) {}
 
-  private calculateDeliveryDistance(
+/*   private calculateDeliveryDistance(
     lat1: number,
     lng1: number,
     lat2: number,
@@ -85,9 +87,9 @@ export class DeliveriesService {
       estimatedTime,
       deliveryFee,
     };
-  }
+  } */
 
-  public calculateDeliveryFeeForLocation(
+/*   public calculateDeliveryFeeForLocation(
     customerLat: number,
     customerLng: number,
     restaurantLat: number = 19.922828240529658,
@@ -108,6 +110,35 @@ export class DeliveriesService {
         customerLat,
         customerLng,
       ),
+    };
+  } */
+  public async calculateDeliveryFeeForLocation(
+    customerLat: number,
+    customerLng: number,
+  ) {
+    return await this.simpleDeliveryFeeService.calculateDeliveryFee(
+      customerLat,
+      customerLng
+    );
+  }
+
+ private async calculateDeliveryDistance(
+    restaurantLat: number,
+    restaurantLng: number,
+    customerLat: number,
+    customerLng: number,
+  ) {
+    // ใช้ service ใหม่แทน
+    const result = await this.simpleDeliveryFeeService.calculateDeliveryFee(
+      customerLat,
+      customerLng
+    );
+
+    return {
+      distance: result.distance * 1000, // แปลงเป็นเมตร
+      estimatedTime: result.estimatedTime,
+      deliveryFee: result.deliveryFee,
+      isWithinDeliveryArea: result.isWithinDeliveryArea
     };
   }
 
@@ -154,7 +185,8 @@ export class DeliveriesService {
 
     // 🔥 Calculate delivery fee based on distance
     const restaurantLocation = { lat: 19.8845, lng: 102.135 }; // ตำแหน่งร้าน
-    const deliveryInfo = this.calculateDeliveryDistance(
+    //change this 📦
+    const deliveryInfo = await this.calculateDeliveryDistance(
       restaurantLocation.lat,
       restaurantLocation.lng,
       createDeliveryDto.customer_latitude,
@@ -1399,8 +1431,9 @@ export class EnhancedDeliveriesService extends DeliveriesService {
     prisma: PrismaService,
     customerNotificationsService: CustomerNotificationsService,
     private readonly locationService: LocationService,
+    simpleDeliveryFeeService: SimpleDeliveryFeeService,
   ) {
-    super(prisma, customerNotificationsService);
+    super(prisma, customerNotificationsService, simpleDeliveryFeeService);
   }
   /**
    * Enhanced location update with GPS validation
