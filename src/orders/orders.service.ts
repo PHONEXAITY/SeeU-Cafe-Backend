@@ -755,7 +755,7 @@ private validateWebhookPayload(payload: any, webhookType: string) {
     console.log('🚀 [ORDER_CREATE] Attempting to send webhook...');
     
      try {
-      const lineResult = await this.sendLineNotificationDirect(createdOrder);
+      /* const lineResult = await this.sendLineNotificationDirect(createdOrder); */
       
     } catch (lineError) {
       console.error('❌ [ORDER_CREATE] Line notification exception:', {

@@ -71,7 +71,7 @@ export class WebhookService {
       }
 
       // Primary configuration with proper TLS
-      this.mailTransporter = nodemailer.createTransporter({
+      this.mailTransporter = nodemailer.createTransport({
         host: emailHost,
         port: emailPort,
         secure: false, // Use STARTTLS for port 587
@@ -99,8 +99,10 @@ export class WebhookService {
       this.logger.log('Mail transporter created, testing connection...');
       
       // Test the connection
-      await this.mailTransporter.verify();
-      this.logger.log('✅ SMTP connection verified successfully');
+      if (this.mailTransporter) {
+        await this.mailTransporter.verify();
+        this.logger.log('✅ SMTP connection verified successfully');
+      }
       this.isTransporterInitialized = true;
       
     } catch (error) {
@@ -122,7 +124,7 @@ private async initializeFallbackTransporter() {
         return;
       }
 
-      this.mailTransporter = nodemailer.createTransporter({
+      this.mailTransporter = nodemailer.createTransport({
         service: 'gmail', // Use Gmail service preset
         auth: {
           user: emailUser,
@@ -136,8 +138,10 @@ private async initializeFallbackTransporter() {
         logger: process.env.NODE_ENV === 'development',
       });
       
-      await this.mailTransporter.verify();
-      this.logger.log('✅ Fallback SMTP connection successful');
+      if (this.mailTransporter) {
+        await this.mailTransporter.verify();
+        this.logger.log('✅ Fallback SMTP connection successful');
+      }
       this.isTransporterInitialized = true;
       
     } catch (error) {
@@ -200,7 +204,6 @@ private async sendEmailDirect(mailOptions: any) {
     throw error;
   }
 }
-
 
 private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -356,6 +359,7 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
 private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
   return await this.sendNewOrderNotification(payload);
 }
+
 private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload): Promise<WebhookNotificationResult> {
     const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
                       this.configService.get<string>('EMAIL_USER');
