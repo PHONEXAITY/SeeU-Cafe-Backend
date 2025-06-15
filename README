@@ -1,0 +1,20 @@
+# รันแบบปกติ (เก็บข้อมูลไว้)
+make dev
+
+# รันแบบลบข้อมูลทั้งหมด (เมื่อต้องการเริ่มใหม่)
+make dev-fresh
+
+# รันโดยไม่ seed ข้อมูล
+make dev-skip-seed
+
+# ดูสถานะ services
+make status
+
+# ดูข้อมูล volumes
+make volumes
+
+# หยุดโดยเก็บข้อมูลไว้
+make stop
+
+# ลบทุกอย่างรวมข้อมูล (ระวัง!)
+make clean

@@ -3,10 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
 import * as nodemailer from 'nodemailer';
-import { 
-  OrderWebhookPayload, 
-  SalesReportPayload, 
-  TableStatusPayload 
+import {
+  OrderWebhookPayload,
+  SalesReportPayload,
+  TableStatusPayload,
 } from './webhook.controller';
 
 interface WebhookNotificationResult {
@@ -37,33 +37,40 @@ export class WebhookService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
   ) {
     this.logger.log(`EMAIL_HOST: ${this.configService.get('EMAIL_HOST')}`);
     this.logger.log(`EMAIL_USER: ${this.configService.get('EMAIL_USER')}`);
     this.logger.log(`ADMIN_EMAIL: ${this.configService.get('ADMIN_EMAIL')}`);
-    
+
     setTimeout(() => {
-      this.initializeMailTransporter().catch(error => {
+      this.initializeMailTransporter().catch((error) => {
         this.logger.error('Failed to initialize mail transporter:', error);
         this.mailTransporter = null;
       });
     }, 1000); // รอ 1 วินาที
   }
 
- private async initializeMailTransporter() {
+  private async initializeMailTransporter() {
     if (this.isTransporterInitialized) {
       return;
     }
 
     try {
-      const emailHost = this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com');
+      const emailHost = this.configService.get<string>(
+        'EMAIL_HOST',
+        'smtp.gmail.com',
+      );
       const emailUser = this.configService.get<string>('EMAIL_USER');
       const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
-      const emailPort = parseInt(this.configService.get<string>('EMAIL_PORT', '587'));
-      
-      this.logger.log(`Initializing mail transporter: ${emailHost}:${emailPort}`);
-      
+      const emailPort = parseInt(
+        this.configService.get<string>('EMAIL_PORT', '587'),
+      );
+
+      this.logger.log(
+        `Initializing mail transporter: ${emailHost}:${emailPort}`,
+      );
+
       if (!emailHost || !emailUser || !emailPassword) {
         this.logger.warn('Email configuration incomplete');
         this.isTransporterInitialized = true;
@@ -95,29 +102,28 @@ export class WebhookService {
         debug: process.env.NODE_ENV === 'development',
         logger: process.env.NODE_ENV === 'development',
       });
-      
+
       this.logger.log('Mail transporter created, testing connection...');
-      
+
       // Test the connection
       if (this.mailTransporter) {
         await this.mailTransporter.verify();
         this.logger.log('✅ SMTP connection verified successfully');
       }
       this.isTransporterInitialized = true;
-      
     } catch (error) {
       this.logger.error('Primary SMTP configuration failed:', error.message);
       await this.initializeFallbackTransporter();
     }
   }
 
-private async initializeFallbackTransporter() {
+  private async initializeFallbackTransporter() {
     try {
       this.logger.log('🔄 Trying fallback transporter (Gmail service)...');
-      
+
       const emailUser = this.configService.get<string>('EMAIL_USER');
       const emailPassword = this.configService.get<string>('EMAIL_PASSWORD');
-      
+
       if (!emailUser || !emailPassword) {
         this.logger.error('Email credentials not available for fallback');
         this.isTransporterInitialized = true;
@@ -131,19 +137,18 @@ private async initializeFallbackTransporter() {
           pass: emailPassword,
         },
         tls: {
-          rejectUnauthorized: false
+          rejectUnauthorized: false,
         },
         pool: true,
         debug: process.env.NODE_ENV === 'development',
         logger: process.env.NODE_ENV === 'development',
       });
-      
+
       if (this.mailTransporter) {
         await this.mailTransporter.verify();
         this.logger.log('✅ Fallback SMTP connection successful');
       }
       this.isTransporterInitialized = true;
-      
     } catch (error) {
       this.logger.error('Fallback transporter also failed:', error.message);
       this.mailTransporter = null;
@@ -163,7 +168,9 @@ private async initializeFallbackTransporter() {
         await this.mailTransporter.verify();
         return this.mailTransporter;
       } catch (error) {
-        this.logger.warn('Existing transporter failed verification, recreating...');
+        this.logger.warn(
+          'Existing transporter failed verification, recreating...',
+        );
         this.mailTransporter = null;
         this.isTransporterInitialized = false;
         await this.initializeMailTransporter();
@@ -174,44 +181,45 @@ private async initializeFallbackTransporter() {
     return null;
   }
 
-private async sendEmailDirect(mailOptions: any) {
-  try {
-    const nodemailer = require('nodemailer');
-    
-    const directTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: this.configService.get<string>('EMAIL_USER'),
-        pass: this.configService.get<string>('EMAIL_PASSWORD'),
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
+  private async sendEmailDirect(mailOptions: any) {
+    try {
+      /* const nodemailer = require('nodemailer'); */
 
-    const result = await directTransporter.sendMail(mailOptions);
-    
-    this.logger.log('✅ Direct email sent successfully:', {
-      messageId: result.messageId,
-      to: mailOptions.to,
-      subject: mailOptions.subject
-    });
-    
-    return result;
-    
-  } catch (error) {
-    this.logger.error('❌ Direct email sending failed:', error);
-    throw error;
+      const directTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: this.configService.get<string>('EMAIL_USER'),
+          pass: this.configService.get<string>('EMAIL_PASSWORD'),
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+      });
+
+      const result = await directTransporter.sendMail(mailOptions);
+
+      this.logger.log('✅ Direct email sent successfully:', {
+        messageId: result.messageId,
+        to: mailOptions.to,
+        subject: mailOptions.subject,
+      });
+
+      return result;
+    } catch (error) {
+      this.logger.error('❌ Direct email sending failed:', error);
+      throw error;
+    }
   }
-}
 
-private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
+  private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        this.logger.log(`📧 Sending email (attempt ${attempt}/${maxRetries})...`);
-        
+        this.logger.log(
+          `📧 Sending email (attempt ${attempt}/${maxRetries})...`,
+        );
+
         const transporter = await this.getWorkingTransporter();
-        
+
         if (!transporter) {
           throw new Error('No working email transporter available');
         }
@@ -220,31 +228,37 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
         this.logger.log(`✅ Email sent successfully on attempt ${attempt}`, {
           messageId: result.messageId,
           to: mailOptions.to,
-          subject: mailOptions.subject
+          subject: mailOptions.subject,
         });
         return result;
-        
       } catch (error) {
-        this.logger.error(`❌ Email sending attempt ${attempt} failed:`, error.message);
-        
+        this.logger.error(
+          `❌ Email sending attempt ${attempt} failed:`,
+          error.message,
+        );
+
         if (attempt === maxRetries) {
           throw error;
         }
-        
+
         // Reset transporter for next attempt
         this.mailTransporter = null;
         this.isTransporterInitialized = false;
-        
+
         // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       }
     }
   }
 
- async sendNewOrderNotification(payload: OrderWebhookPayload): Promise<WebhookNotificationResult> {
+  async sendNewOrderNotification(
+    payload: OrderWebhookPayload,
+  ): Promise<WebhookNotificationResult> {
     const requestId = Date.now().toString();
-    this.logger.log(`📥 [${requestId}] Sending new order notification for order: ${payload.orderId}`);
-    
+    this.logger.log(
+      `📥 [${requestId}] Sending new order notification for order: ${payload.orderId}`,
+    );
+
     console.log(`📋 [${requestId}] Received webhook payload:`, {
       orderId: payload.orderId,
       totalPrice: payload.totalPrice,
@@ -255,24 +269,32 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
       timestamp: payload.timestamp,
     });
 
-    const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
+    const lineToken = this.configService.get<string>(
+      'LINE_CHANNEL_ACCESS_TOKEN',
+    );
     const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
-    
+
     if (!lineToken || !lineUserId) {
-      this.logger.warn(`[${requestId}] Line credentials not configured, falling back to email`);
+      this.logger.warn(
+        `[${requestId}] Line credentials not configured, falling back to email`,
+      );
       return await this.sendOrderNotificationEmail(null, payload);
     }
 
-    const itemsList = payload.items?.map(item => 
-      `• ${item.name} x${item.quantity} (₭${item.price.toLocaleString()})`
-    ).join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
+    const itemsList =
+      payload.items
+        ?.map(
+          (item) =>
+            `• ${item.name} x${item.quantity} (₭${item.price.toLocaleString()})`,
+        )
+        .join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
 
     const customerName = payload.customerInfo?.name || 'ລູກຄ້າ';
     const customerPhone = payload.customerInfo?.phone || 'ບໍ່ລະບຸ';
 
     const isTestOrder = payload.orderId?.toString().includes('TEST');
     const orderTypeText = this.getOrderTypeText(payload.orderType);
-    
+
     let message = `🔔 *ອໍເດີ້ໃໝ່${isTestOrder ? ' (TEST)' : ''}*
 📋 ລະຫັດ: ${payload.orderId}
 💰 ຍອດລວມ: ₭${payload.totalPrice.toLocaleString()}
@@ -283,7 +305,7 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     if (payload.tableNumber) {
       message += `\n🪑 ໂຕະ: ${payload.tableNumber}`;
     }
-    
+
     if (payload.deliveryAddress) {
       message += `\n🚚 ທີ່ຢູ່: ${payload.deliveryAddress}`;
     }
@@ -293,12 +315,17 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
     if (payload.estimatedReadyTime) {
       try {
         const readyTime = new Date(payload.estimatedReadyTime);
-        message += `\n\n⏰ ເວລາແລ້ວໂດຍປະມານ: ${readyTime.toLocaleTimeString('th-TH', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })}`;
+        message += `\n\n⏰ ເວລາແລ້ວໂດຍປະມານ: ${readyTime.toLocaleTimeString(
+          'th-TH',
+          {
+            hour: '2-digit',
+            minute: '2-digit',
+          },
+        )}`;
       } catch (error) {
-        this.logger.warn(`[${requestId}] Invalid estimated ready time: ${payload.estimatedReadyTime}`);
+        this.logger.warn(
+          `[${requestId}] Invalid estimated ready time: ${payload.estimatedReadyTime}`,
+        );
       }
     }
 
@@ -306,7 +333,7 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
 
     try {
       this.logger.log(`[${requestId}] Sending to Line API...`);
-      
+
       const response = await axios.post(
         'https://api.line.me/v2/bot/message/push',
         {
@@ -314,17 +341,17 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
           messages: [
             {
               type: 'text',
-              text: message
-            }
-          ]
+              text: message,
+            },
+          ],
         },
         {
           headers: {
-            'Authorization': `Bearer ${lineToken}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${lineToken}`,
+            'Content-Type': 'application/json',
           },
-          timeout: 10000
-        }
+          timeout: 10000,
+        },
       );
 
       const lineResponse = response.data as LineApiResponse;
@@ -335,14 +362,14 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
         messageLength: message.length,
       });
 
-      return { 
-        sent: true, 
+      return {
+        sent: true,
         via: 'line',
         messageId: lineResponse?.sentMessages?.[0]?.id || 'unknown',
         customerName,
         itemsCount: payload.items?.length || 0,
         timestamp: new Date().toISOString(),
-        requestId
+        requestId,
       };
     } catch (error) {
       this.logger.error(`❌ [${requestId}] Failed to send Line notification:`, {
@@ -351,51 +378,62 @@ private async sendEmailWithRetry(mailOptions: any, maxRetries = 3) {
         status: error.response?.status,
         data: error.response?.data,
       });
-      
+
       return await this.sendOrderNotificationEmail(null, payload);
     }
   }
 
-private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
-  return await this.sendNewOrderNotification(payload);
-}
+  private async sendOrderNotificationFromPayload(payload: OrderWebhookPayload) {
+    return await this.sendNewOrderNotification(payload);
+  }
 
-private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPayload): Promise<WebhookNotificationResult> {
-    const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
-                      this.configService.get<string>('EMAIL_USER');
+  private async sendOrderNotificationEmail(
+    order: any,
+    payload?: OrderWebhookPayload,
+  ): Promise<WebhookNotificationResult> {
+    const adminEmail =
+      this.configService.get<string>('ADMIN_EMAIL') ||
+      this.configService.get<string>('EMAIL_USER');
 
     if (!adminEmail) {
       this.logger.warn('No admin email configured for fallback notification');
-      return { 
-        sent: false, 
+      return {
+        sent: false,
         via: 'email',
         reason: 'No admin email configured',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     }
 
-    const orderData = payload ? {
-      order_id: payload.orderId,
-      total_price: payload.totalPrice,
-      order_type: payload.orderType,
-      user: {
-        first_name: payload.customerInfo?.name?.split(' ')[0] || '',
-        last_name: payload.customerInfo?.name?.split(' ').slice(1).join(' ') || '',
-        phone: payload.customerInfo?.phone || '',
-      },
-      order_details: payload.items || [],
-      table: payload.tableNumber ? { number: payload.tableNumber } : null,
-      delivery: payload.deliveryAddress ? { delivery_address: payload.deliveryAddress } : null,
-    } : order;
+    const orderData = payload
+      ? {
+          order_id: payload.orderId,
+          total_price: payload.totalPrice,
+          order_type: payload.orderType,
+          user: {
+            first_name: payload.customerInfo?.name?.split(' ')[0] || '',
+            last_name:
+              payload.customerInfo?.name?.split(' ').slice(1).join(' ') || '',
+            phone: payload.customerInfo?.phone || '',
+          },
+          order_details: payload.items || [],
+          table: payload.tableNumber ? { number: payload.tableNumber } : null,
+          delivery: payload.deliveryAddress
+            ? { delivery_address: payload.deliveryAddress }
+            : null,
+        }
+      : order;
 
-    const itemsList = (payload?.items || order?.order_details || []).map(detail => {
-      if (payload?.items) {
-        return `<li>${detail.name} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
-      } else {
-        const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-        return `<li>${itemName} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
-      }
-    }).join('');
+    const itemsList = (payload?.items || order?.order_details || [])
+      .map((detail) => {
+        if (payload?.items) {
+          return `<li>${detail.name} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
+        } else {
+          const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
+          return `<li>${itemName} x${detail.quantity} - ₭${detail.price.toLocaleString()}</li>`;
+        }
+      })
+      .join('');
 
     const isTestOrder = orderData.order_id?.toString().includes('TEST');
     const customerName = orderData.user?.first_name || 'ไม่ระบุ';
@@ -431,124 +469,136 @@ private async sendOrderNotificationEmail(order: any, payload?: OrderWebhookPaylo
       from: this.configService.get<string>('EMAIL_FROM'),
       to: adminEmail,
       subject: `🔔 ອໍເດີ້ໃໝ່${isTestOrder ? ' (TEST)' : ''} - ${orderData.order_id}`,
-      html: emailHtml
+      html: emailHtml,
     };
 
     try {
       const result = await this.sendEmailWithRetry(mailOptions);
-      
-      return { 
-        sent: true, 
+
+      return {
+        sent: true,
         via: 'email',
         messageId: result.messageId,
         customerName,
         itemsCount: payload?.items?.length || 0,
         fallbackReason: 'Line API not available',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      this.logger.error('Failed to send notification email after all retries:', error);
-      return { 
-        sent: false, 
+      this.logger.error(
+        'Failed to send notification email after all retries:',
+        error,
+      );
+      return {
+        sent: false,
         via: 'email',
         error: error.message,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     }
   }
 
-private getOrderTypeText(orderType: string): string {
-  switch (orderType) {
-    case 'pickup': return 'ຮັບເອງ';
-    case 'delivery': return 'ຈັດສົ່ງ';
-    case 'table': return 'ກິນທີ່ຮ້ານ';
-    case 'dine-in': return 'ກິນທີ່ຮ້ານ';
-    default: return orderType;
+  private getOrderTypeText(orderType: string): string {
+    switch (orderType) {
+      case 'pickup':
+        return 'ຮັບເອງ';
+      case 'delivery':
+        return 'ຈັດສົ່ງ';
+      case 'table':
+        return 'ກິນທີ່ຮ້ານ';
+      case 'dine-in':
+        return 'ກິນທີ່ຮ້ານ';
+      default:
+        return orderType;
+    }
   }
-}
 
-async sendSalesReport(payload: SalesReportPayload) {
+  async sendSalesReport(payload: SalesReportPayload) {
     this.logger.log(`Generating sales report: ${payload.reportType}`);
-    
+
     try {
       const { startDate, endDate } = this.getDateRange(payload.reportType);
-      
+
       const salesData = await this.prisma.order.findMany({
         where: {
           create_at: {
             gte: startDate,
-            lte: endDate
+            lte: endDate,
           },
           status: {
-            in: ['completed', 'delivered']
-          }
+            in: ['completed', 'delivered'],
+          },
         },
         include: {
           order_details: {
             include: {
               food_menu: true,
-              beverage_menu: true
-            }
+              beverage_menu: true,
+            },
           },
-          payments: true
+          payments: true,
         },
         orderBy: {
-          create_at: 'desc'
-        }
+          create_at: 'desc',
+        },
       });
 
       const reportData = this.processSalesData(salesData);
-      
-      const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 
-                        this.configService.get<string>('EMAIL_USER');
-      
+
+      const adminEmail =
+        this.configService.get<string>('ADMIN_EMAIL') ||
+        this.configService.get<string>('EMAIL_USER');
+
       if (!adminEmail) {
         throw new Error('Admin email not configured');
       }
 
-      const emailHtml = this.generateSalesReportHtml(reportData, payload.reportType);
-      
+      const emailHtml = this.generateSalesReportHtml(
+        reportData,
+        payload.reportType,
+      );
+
       const mailOptions = {
         from: this.configService.get<string>('EMAIL_FROM'),
         to: adminEmail,
         subject: `📊 ລາຍງານຍອດຂາຍ${this.getReportTypeText(payload.reportType)} - ${new Date().toLocaleDateString('th-TH')}`,
-        html: emailHtml
+        html: emailHtml,
       };
 
       const result = await this.sendEmailWithRetry(mailOptions);
-      
-      return { 
-        sent: true, 
+
+      return {
+        sent: true,
         via: 'email',
         messageId: result.messageId,
         reportType: payload.reportType,
         totalSales: reportData.totalSales,
         totalOrders: reportData.totalOrders,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       this.logger.error('Failed to send sales report email:', error);
       throw new HttpException(
         `Failed to send sales report: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   async sendPickupCode(payload: OrderWebhookPayload) {
     this.logger.log(`Sending pickup code for order: ${payload.orderId}`);
-    
+
     const order = await this.prisma.order.findUnique({
       where: { order_id: payload.orderId },
       include: {
-        user: true
-      }
+        user: true,
+      },
     });
 
     if (!order || !order.user?.email) {
       throw new HttpException(
         'Order not found or customer email missing',
-        HttpStatus.BAD_REQUEST
+        HttpStatus.BAD_REQUEST,
       );
     }
 
@@ -574,189 +624,441 @@ async sendSalesReport(payload: SalesReportPayload) {
       </p>
     </div>
     `;
-    
+
     const mailOptions = {
       from: 'phoneyang1@gmail.com',
       to: order.user.email,
       subject: `🎫 ລະຫັດຮັບສິນຄ້າ - ອໍເດີ້ ${order.order_id}`,
-      html: emailHtml
+      html: emailHtml,
     };
 
     try {
-      const nodemailer = require('nodemailer');
+      /* const nodemailer = require('nodemailer'); */
       const directTransporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
         port: 587,
         secure: false,
         auth: {
           user: 'phoneyang1@gmail.com',
-          pass: 'sdzq dbrm xivu nujp'
-        }
+          pass: 'sdzq dbrm xivu nujp',
+        },
       });
 
       const result = await directTransporter.sendMail(mailOptions);
-      
-      return { 
-        sent: true, 
+
+      return {
+        sent: true,
         via: 'direct-nodemailer',
         messageId: result.messageId,
         pickupCode: order.pickup_code,
         customerEmail: order.user.email,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       this.logger.error('Failed to send pickup code email:', error);
       throw new HttpException(
         'Failed to send pickup code',
-        HttpStatus.INTERNAL_SERVER_ERROR
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   async sendReceipt(payload: OrderWebhookPayload) {
-    this.logger.log(`Sending receipt for order: ${payload.orderId}`);
-    
-    const order = await this.prisma.order.findUnique({
-      where: { order_id: payload.orderId },
-      include: {
-        user: true,
-        order_details: {
-          include: {
-            food_menu: true,
-            beverage_menu: true
-          }
-        },
-        payments: true,
-        table: true
-      }
-    });
-
-    if (!order || !order.user?.email) {
-      throw new HttpException(
-        'Order not found or customer email missing',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    const itemsList = order.order_details.map(detail => {
-      const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
-      return `
-      <tr>
-        <td>${itemName}</td>
-        <td style="text-align: center;">${detail.quantity}</td>
-        <td style="text-align: right;">₭${detail.price.toLocaleString()}</td>
-      </tr>
-      `;
-    }).join('');
-
-    const emailHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1>SeeU Cafe</h1>
-        <h2>ໃບບິນຮັບເງີນ</h2>
-      </div>
-      
-      <div style="margin-bottom: 20px;">
-        <p><strong>ອໍເດີ້:</strong> ${order.order_id}</p>
-        <p><strong>ວັນທີ່:</strong> ${order.create_at.toLocaleDateString('th-TH')}</p>
-        <p><strong>ລູກຄ້າ:</strong> ${order.user.first_name} ${order.user.last_name || ''}</p>
-        ${order.table ? `<p><strong>ໂຕະ:</strong> ${order.table.number}</p>` : ''}
-      </div>
-      
-      <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-          <tr style="background-color: #f8f9fa;">
-            <th style="padding: 8px; border-bottom: 1px solid #ddd;">ລາຍການ</th>
-            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 80px;">ຈຳນວນ</th>
-            <th style="padding: 8px; border-bottom: 1px solid #ddd; width: 100px;">ລາຄາ</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsList}
-        </tbody>
-      </table>
-      
-      <div style="margin-top: 20px; text-align: right;">
-        <p style="font-weight: bold; font-size: 16px;">ຍອດລວມ: ₭${order.total_price.toLocaleString()}</p>
-      </div>
-      
-      <div style="margin-top: 30px; text-align: center; color: #666;">
-        <p>ຂອບໃຈທີ່ໃຊ້ບໍລິການ</p>
-        <p>SeeU Cafe</p>
-      </div>
-    </div>
-    `;
-    
-    const mailOptions = {
-      from: 'phoneyang1@gmail.com',
-      to: order.user.email,
-      subject: `🧾 ໃບບິນ - ອໍເດີ້ ${order.order_id}`,
-      html: emailHtml
-    };
+    this.logger.log(`📧 Sending receipt for order: ${payload.orderId}`);
 
     try {
-      const nodemailer = require('nodemailer');
-      const directTransporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: 'phoneyang1@gmail.com',
-          pass: 'sdzq dbrm xivu nujp'
-        }
+      // First, find the order with complete data
+      const order = await this.prisma.order.findUnique({
+        where: { order_id: payload.orderId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+              phone: true,
+            },
+          },
+          order_details: {
+            include: {
+              food_menu: {
+                select: {
+                  name: true,
+                  price: true,
+                },
+              },
+              beverage_menu: {
+                select: {
+                  name: true,
+                  hot_price: true,
+                  ice_price: true,
+                },
+              },
+            },
+          },
+          payments: {
+            orderBy: {
+              payment_date: 'desc',
+            },
+          },
+          table: {
+            select: {
+              number: true,
+            },
+          },
+          delivery: {
+            select: {
+              delivery_address: true,
+              delivery_fee: true,
+            },
+          },
+        },
       });
 
-      const result = await directTransporter.sendMail(mailOptions);
-      
-      return { 
-        sent: true, 
-        via: 'direct-nodemailer',
-        messageId: result.messageId,
-        receiptGenerated: true,
-        customerEmail: order.user.email,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      this.logger.error('Failed to send receipt email:', error);
-      throw new HttpException(
-        'Failed to send receipt',
-        HttpStatus.INTERNAL_SERVER_ERROR
+      if (!order) {
+        throw new Error(`Order ${payload.orderId} not found in database`);
+      }
+
+      if (!order.user?.email) {
+        throw new Error(
+          `Customer email not found for order ${payload.orderId}`,
+        );
+      }
+
+      // Validate order is completed
+      if (!['confirmed', 'completed', 'delivered'].includes(order.status)) {
+        this.logger.warn(
+          `Order ${payload.orderId} status is ${order.status}, not completed`,
+        );
+        return {
+          sent: false,
+          via: 'email',
+          reason: `Order status is ${order.status}, not completed`,
+          orderId: payload.orderId,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Check if payment is completed
+      const completedPayment = order.payments?.find(
+        (p) => p.status === 'completed',
       );
+      if (!completedPayment) {
+        this.logger.warn(
+          `No completed payment found for order ${payload.orderId}`,
+        );
+        return {
+          sent: false,
+          via: 'email',
+          reason: 'No completed payment found',
+          orderId: payload.orderId,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Prepare receipt data
+      const customerName =
+        `${order.user.first_name || ''} ${order.user.last_name || ''}`.trim() ||
+        'ລູກຄ້າ';
+      const receiptDate = new Date();
+
+      // Calculate totals
+      let subtotal = 0;
+      const itemsList = order.order_details
+        .map((detail) => {
+          const itemName =
+            detail.food_menu?.name ||
+            detail.beverage_menu?.name ||
+            'ບໍ່ລະບຸຊື່';
+          const itemPrice = detail.price;
+          const lineTotal = itemPrice * detail.quantity;
+          subtotal += lineTotal;
+
+          return `
+      <tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 8px; text-align: left;">${itemName}</td>
+        <td style="padding: 8px; text-align: center;">${detail.quantity}</td>
+        <td style="padding: 8px; text-align: right;">₭${itemPrice.toLocaleString()}</td>
+        <td style="padding: 8px; text-align: right; font-weight: bold;">₭${lineTotal.toLocaleString()}</td>
+      </tr>
+      `;
+        })
+        .join('');
+
+      const deliveryFee = order.delivery?.delivery_fee || 0;
+      const discountAmount = order.discount_amount || 0;
+      const finalTotal = subtotal + deliveryFee - discountAmount;
+
+      // Generate receipt HTML
+      const receiptHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>ໃບບິນ - ${order.order_id}</title>
+      <style>
+        body { font-family: 'Phetsarath_OT', Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .receipt { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #2c3e50; padding-bottom: 20px; }
+        .logo { font-size: 28px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
+        .receipt-title { font-size: 20px; color: #e74c3c; margin-bottom: 10px; }
+        .order-info { background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .items-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .items-table th { background: #34495e; color: white; padding: 12px; text-align: left; }
+        .totals { margin-top: 20px; padding-top: 20px; border-top: 2px solid #bdc3c7; }
+        .total-row { display: flex; justify-content: space-between; margin: 8px 0; }
+        .final-total { font-size: 18px; font-weight: bold; color: #e74c3c; background: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .footer { text-align: center; margin-top: 30px; color: #7f8c8d; border-top: 1px solid #bdc3c7; padding-top: 20px; }
+        .thank-you { color: #27ae60; font-weight: bold; font-size: 16px; }
+      </style>
+    </head>
+    <body>
+      <div class="receipt">
+        <div class="header">
+          <div class="logo">🏪 SeeU Cafe</div>
+          <div class="receipt-title">ໃບບິນຮັບເງີນ / Receipt</div>
+          <div style="color: #7f8c8d;">Luang Prabang, Laos</div>
+        </div>
+        
+        <div class="order-info">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div>
+              <strong>ລະຫັດອໍເດີ້ / Order ID:</strong><br>
+              <span style="font-family: monospace; background: #fff; padding: 2px 6px; border-radius: 3px;">${order.order_id}</span>
+            </div>
+            <div>
+              <strong>ວັນທີ່ / Date:</strong><br>
+              ${receiptDate.toLocaleDateString('lo-LA', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })} <br>
+              <small>${receiptDate.toLocaleTimeString('lo-LA')}</small>
+            </div>
+            <div>
+              <strong>ລູກຄ້າ / Customer:</strong><br>
+              ${customerName}
+            </div>
+            <div>
+              <strong>ປະເພດອໍເດີ້ / Order Type:</strong><br>
+              ${this.getOrderTypeText(order.order_type)}
+            </div>
+          </div>
+          
+          ${
+            order.table
+              ? `
+          <div style="margin-top: 10px;">
+            <strong>ໂຕະ / Table:</strong> ${order.table.number}
+          </div>
+          `
+              : ''
+          }
+          
+          ${
+            order.delivery
+              ? `
+          <div style="margin-top: 10px;">
+            <strong>ທີ່ຢູ່ຈັດສົ່ງ / Delivery Address:</strong><br>
+            <span style="background: #fff3cd; padding: 4px 8px; border-radius: 3px; display: inline-block; margin-top: 5px;">
+              📍 ${order.delivery.delivery_address}
+            </span>
+          </div>
+          `
+              : ''
+          }
+          
+          <div style="margin-top: 10px;">
+            <strong>ວິທີຊຳລະ / Payment Method:</strong> 
+            ${this.getPaymentMethodText(completedPayment.method)}
+          </div>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">ລາຍການ / Item</th>
+              <th style="text-align: center; width: 80px;">ຈຳນວນ / Qty</th>
+              <th style="text-align: right; width: 100px;">ລາຄາ / Price</th>
+              <th style="text-align: right; width: 120px;">ລວມ / Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsList}
+          </tbody>
+        </table>
+
+        <div class="totals">
+          <div class="total-row">
+            <span>ລວມຍ່ອຍ / Subtotal:</span>
+            <span>₭${subtotal.toLocaleString()}</span>
+          </div>
+          
+          ${
+            deliveryFee > 0
+              ? `
+          <div class="total-row">
+            <span>ຄ່າຈັດສົ່ງ / Delivery Fee:</span>
+            <span>₭${deliveryFee.toLocaleString()}</span>
+          </div>
+          `
+              : ''
+          }
+          
+          ${
+            discountAmount > 0
+              ? `
+          <div class="total-row" style="color: #27ae60;">
+            <span>ສ່ວນຫຼຸດ / Discount:</span>
+            <span>-₭${discountAmount.toLocaleString()}</span>
+          </div>
+          `
+              : ''
+          }
+          
+          <div class="total-row final-total">
+            <span>ລວມທັງໝົດ / Grand Total:</span>
+            <span>₭${finalTotal.toLocaleString()}</span>
+          </div>
+        </div>
+        
+        <div class="footer">
+          <div class="thank-you">
+            🙏 ຂອບໃຈທີ່ໃຊ້ບໍລິການ<br>
+            Thank you for your business!
+          </div>
+          <div style="margin-top: 15px;">
+            <div>📞 Phone: +856 20 5555 5555</div>
+            <div>📧 Email: info@seeucafe.la</div>
+            <div>🌐 Website: www.seeucafe.la</div>
+          </div>
+          <div style="margin-top: 15px; font-size: 12px;">
+            Receipt generated on ${receiptDate.toISOString()}<br>
+            Powered by SeeU Cafe POS System
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+    `;
+
+      // Prepare email options
+      const emailSubject = `🧾 ໃບບິນ / Receipt - ອໍເດີ້ ${order.order_id}`;
+      const emailFrom =
+        this.configService.get<string>('EMAIL_FROM') || 'phoneyang1@gmail.com';
+
+      const mailOptions = {
+        from: `"SeeU Cafe" <${emailFrom}>`,
+        to: order.user.email,
+        subject: emailSubject,
+        html: receiptHtml,
+        attachments: [],
+        headers: {
+          'X-Order-ID': order.order_id,
+          'X-Customer-ID': order.user.id.toString(),
+          'X-Receipt-Type': 'final',
+          'X-Mailer': 'SeeU Cafe POS System',
+        },
+      };
+
+      // Send email using direct nodemailer
+      try {
+        /* const nodemailer = require('nodemailer'); */
+
+        const directTransporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: this.configService.get<string>('EMAIL_USER'),
+            pass: this.configService.get<string>('EMAIL_PASSWORD'),
+          },
+          tls: {
+            rejectUnauthorized: false,
+          },
+        });
+
+        const result = await directTransporter.sendMail(mailOptions);
+
+        this.logger.log(`✅ Receipt sent successfully:`, {
+          orderId: order.order_id,
+          customerEmail: order.user.email,
+          customerName,
+          messageId: result.messageId,
+          totalAmount: finalTotal,
+        });
+
+        return {
+          sent: true,
+          via: 'email',
+          messageId: result.messageId,
+          receiptGenerated: true,
+          customerEmail: order.user.email,
+          customerName,
+          orderId: order.order_id,
+          totalAmount: finalTotal,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (emailError) {
+        this.logger.error('Failed to send receipt email:', emailError);
+        throw new Error(`Email sending failed: ${emailError.message}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to send receipt for order ${payload.orderId}:`,
+        error,
+      );
+      throw error;
     }
   }
 
+  private getPaymentMethodText(method: string): string {
+    const methods = {
+      cash: 'ເງິນສົດ / Cash',
+      credit_card: 'ບັດເຄຣດິດ / Credit Card',
+      debit_card: 'ບັດເດບິດ / Debit Card',
+      mobile_payment: 'ຈ່າຍຜ່ານມືຖື / Mobile Payment',
+      bank_transfer: 'ໂອນເງິນ / Bank Transfer',
+      qr_code: 'QR Code Payment',
+      other: 'ອື່ນໆ / Other',
+    };
+    return methods[method] || method;
+  }
+
   async updateTableStatus(payload: TableStatusPayload) {
-    this.logger.log(`Updating table ${payload.tableId} status to: ${payload.newStatus}`);
-    
+    this.logger.log(
+      `Updating table ${payload.tableId} status to: ${payload.newStatus}`,
+    );
+
     try {
       const updatedTable = await this.prisma.table.update({
         where: { id: payload.tableId },
-        data: { 
+        data: {
           status: payload.newStatus,
           updated_at: new Date(),
           ...(payload.newStatus === 'occupied' && {
-            current_session_start: new Date()
+            current_session_start: new Date(),
           }),
           ...(payload.newStatus === 'available' && {
             current_session_start: null,
-            expected_end_time: null
-          })
-        }
+            expected_end_time: null,
+          }),
+        },
       });
 
-      return { 
-        updated: true, 
+      return {
+        updated: true,
         tableId: payload.tableId,
         previousStatus: payload.currentStatus,
         newStatus: payload.newStatus,
         tableNumber: updatedTable.number,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       this.logger.error('Failed to update table status:', error);
       throw new HttpException(
         'Failed to update table status',
-        HttpStatus.INTERNAL_SERVER_ERROR
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
@@ -785,12 +1087,15 @@ async sendSalesReport(payload: SalesReportPayload) {
   }
 
   private processSalesData(orders: any[]) {
-    const totalSales = orders.reduce((sum, order) => sum + order.total_price, 0);
+    const totalSales = orders.reduce(
+      (sum, order) => sum + order.total_price,
+      0,
+    );
     const totalOrders = orders.length;
-    
+
     const itemCounts = {};
-    orders.forEach(order => {
-      order.order_details.forEach(detail => {
+    orders.forEach((order) => {
+      order.order_details.forEach((detail) => {
         const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
         if (itemName) {
           itemCounts[itemName] = (itemCounts[itemName] || 0) + detail.quantity;
@@ -799,7 +1104,7 @@ async sendSalesReport(payload: SalesReportPayload) {
     });
 
     const topItems = Object.entries(itemCounts)
-      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .sort(([, a], [, b]) => (b as number) - (a as number))
       .slice(0, 5)
       .map(([name, count]) => ({ name, count }));
 
@@ -807,9 +1112,9 @@ async sendSalesReport(payload: SalesReportPayload) {
   }
 
   private generateSalesReportHtml(data: any, reportType: string) {
-    const topItemsList = data.topItems.map(item => 
-      `<li>${item.name}: ${item.count} ชิ้น</li>`
-    ).join('');
+    const topItemsList = data.topItems
+      .map((item) => `<li>${item.name}: ${item.count} ชิ้น</li>`)
+      .join('');
 
     return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -836,10 +1141,14 @@ async sendSalesReport(payload: SalesReportPayload) {
 
   private getReportTypeText(type: string) {
     switch (type) {
-      case 'daily': return 'ລາຍ';
-      case 'weekly': return 'ລາຍອາທິດ';
-      case 'monthly': return 'ລາຍເດືອນ';
-      default: return '';
+      case 'daily':
+        return 'ລາຍ';
+      case 'weekly':
+        return 'ລາຍອາທິດ';
+      case 'monthly':
+        return 'ລາຍເດືອນ';
+      default:
+        return '';
     }
   }
 }

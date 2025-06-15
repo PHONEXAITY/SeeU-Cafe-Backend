@@ -13,15 +13,21 @@ services:
         condition: service_healthy
     command: >
       sh -c "
-        echo '🔄 Running database migrations...' &&
-        npx prisma migrate deploy &&
-        echo '✅ Migrations completed!'
+        echo '🔄 Checking database migrations...' &&
+        npx prisma migrate status &&
+        if npx prisma migrate status | grep -q 'Database schema is up to date'; then
+          echo '✅ Database already up to date, skipping migrations'
+        else
+          echo '🔄 Running database migrations...' &&
+          npx prisma migrate deploy &&
+          echo '✅ Migrations completed!'
+        fi
       "
     restart: "no"
     networks:
       - app-network
 
-  # Seed Service (เฉพาะ development)
+  # Seed Service (เฉพาะ development และเมื่อไม่มีข้อมูล)
   seed:
     build:
       context: .
@@ -30,17 +36,24 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - NODE_ENV=${NODE_ENV:-development}
+      - SKIP_SEED=${SKIP_SEED:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully
     command: >
       sh -c "
-        if [ \"$$NODE_ENV\" = \"development\" ]; then
-          echo '🌱 Seeding database...' &&
-          npm run seed &&
-          echo '✅ Seeding completed!'
+        if [ \"$$NODE_ENV\" = \"development\" ] && [ \"$$SKIP_SEED\" != \"true\" ]; then
+          echo '🔍 Checking if database needs seeding...' &&
+          USER_COUNT=$$(npx prisma db execute --command=\"SELECT COUNT(*) FROM \\\"User\\\";\" 2>/dev/null | tail -1 | grep -o '[0-9]*' || echo '0') &&
+          if [ \"$$USER_COUNT\" -eq 0 ]; then
+            echo '🌱 Database is empty, seeding...' &&
+            npm run seed &&
+            echo '✅ Seeding completed!'
+          else
+            echo '✅ Database already has data ($$USER_COUNT users), skipping seed'
+          fi
         else
-          echo '⏭️ Skipping seed in production'
+          echo '⏭️ Skipping seed (production or SKIP_SEED=true)'
         fi
       "
     restart: "no"
@@ -91,6 +104,17 @@ services:
       - VAPID_SUBJECT=${VAPID_SUBJECT}
       # Webhooks
       - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
+      - N8N_PICKUP_WEBHOOK_URL=${N8N_PICKUP_WEBHOOK_URL}
+      - N8N_RECEIPT_WEBHOOK_URL=${N8N_RECEIPT_WEBHOOK_URL}
+      - N8N_TABLE_WEBHOOK_URL=${N8N_TABLE_WEBHOOK_URL}
+      # Receipt Configuration
+      - RECEIPT_LOGO_URL=${RECEIPT_LOGO_URL}
+      - RECEIPT_FOOTER_TEXT=${RECEIPT_FOOTER_TEXT}
+      - COMPANY_NAME=${COMPANY_NAME}
+      - COMPANY_ADDRESS=${COMPANY_ADDRESS}
+      - COMPANY_PHONE=${COMPANY_PHONE}
+      - COMPANY_EMAIL=${COMPANY_EMAIL}
+      - COMPANY_WEBSITE=${COMPANY_WEBSITE}
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,7 +131,7 @@ services:
           create_host_path: true
       # 🔥 CRITICAL: Anonymous volume สำหรับ node_modules เพื่อไม่ให้ถูก override
       - /app/node_modules
-      # 🔥 FIX: Uploads volume
+      # 🔥 FIX: Uploads volume - ใช้ named volume แทน
       - uploads-data:/app/uploads
       # 🔥 FIX: Templates volume
       - ./templates:/app/templates:ro
@@ -129,9 +153,12 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-seeu_cafe}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+      # 🔥 FIX: เพิ่ม config สำหรับความเสถียร
+      - PGDATA=/var/lib/postgresql/data/pgdata
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
+      # 🔥 CRITICAL: ใช้ named volume สำหรับข้อมูล PostgreSQL
       - postgres-data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     networks:
@@ -149,8 +176,9 @@ services:
     image: redis:alpine
     ports:
       - "${REDIS_PORT_EXTERNAL:-6379}:6379"
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --save 60 1000
     volumes:
+      # 🔥 CRITICAL: ใช้ named volume สำหรับข้อมูล Redis
       - redis-data:/data
     networks:
       - app-network
@@ -174,6 +202,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      # 🔥 NEW: เพิ่ม volume สำหรับ PGAdmin config
+      - pgadmin-data:/var/lib/pgadmin
     networks:
       - app-network
     restart: unless-stopped
@@ -194,6 +225,7 @@ services:
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
     volumes:
+      # 🔥 CRITICAL: ใช้ named volume สำหรับข้อมูล n8n
       - n8n-data:/home/node/.n8n
     networks:
       - app-network
@@ -204,14 +236,21 @@ services:
       redis:
         condition: service_healthy
     profiles:
-      - development  # เปลี่ยนจาก n8n เป็น development
+      - development
 
 networks:
   app-network:
     driver: bridge
 
 volumes:
+  # 🔥 CRITICAL: ทุก volumes เป็น named volumes เพื่อความเสถียร
   postgres-data:
+    driver: local
   redis-data:
+    driver: local
   n8n-data:
+    driver: local
   uploads-data:
+    driver: local
+  pgadmin-data:
+    driver: local

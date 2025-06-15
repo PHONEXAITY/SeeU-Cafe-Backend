@@ -1,6 +1,6 @@
 #!/bin/bash
 # ========================================
-# scripts/dev.sh - Development Environment (Complete with n8n)
+# scripts/dev.sh - Development Environment (Fixed)
 # ========================================
 
 set -e
@@ -24,6 +24,7 @@ export BUILD_TARGET=development
 REBUILD=false
 FRESH=false
 LOGS=false
+SKIP_SEED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -39,13 +40,19 @@ while [[ $# -gt 0 ]]; do
             LOGS=true
             shift
             ;;
+        --skip-seed)
+            SKIP_SEED=true
+            export SKIP_SEED=true
+            shift
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --rebuild     Force rebuild images"
-            echo "  --fresh       Fresh start (remove volumes)"
+            echo "  --fresh       Fresh start (remove volumes) - ⚠️ DELETES ALL DATA"
             echo "  --logs        Show logs after startup"
+            echo "  --skip-seed   Skip database seeding"
             echo "  --help, -h    Show this help"
             echo ""
             echo "Services included:"
@@ -54,6 +61,10 @@ while [[ $# -gt 0 ]]; do
             echo "  📊 Cache (Redis)       - localhost:6379"
             echo "  🔧 PGAdmin             - http://localhost:5050"
             echo "  🤖 n8n Automation     - http://localhost:5678"
+            echo ""
+            echo "🔍 Data Persistence:"
+            echo "  By default, database data is preserved between runs"
+            echo "  Use --fresh only when you want to completely reset all data"
             exit 0
             ;;
         *)
@@ -115,18 +126,35 @@ echo -e "${GREEN}✅ Directories created${NC}"
 cleanup() {
     echo -e "\n${YELLOW}🧹 Stopping services...${NC}"
     docker-compose --profile development down
-    echo -e "${GREEN}✅ Services stopped${NC}"
+    echo -e "${GREEN}✅ Services stopped (data preserved)${NC}"
     exit 0
 }
 
 # Handle Ctrl+C
 trap cleanup SIGINT SIGTERM
 
-# Fresh start if requested
+# Check if this is a fresh start request
 if [ "$FRESH" = true ]; then
+    echo -e "${RED}⚠️  WARNING: Fresh start will delete ALL database data!${NC}"
+    read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Cancelled by user${NC}"
+        exit 0
+    fi
+    
     echo -e "${PURPLE}🔄 Fresh start - removing volumes...${NC}"
     docker-compose --profile development down -v
+    docker volume prune -f
     echo -e "${GREEN}✅ Volumes removed${NC}"
+fi
+
+# Check existing data
+echo -e "${BLUE}🔍 Checking existing data...${NC}"
+if docker volume ls | grep -q "$(basename $(pwd))_postgres-data"; then
+    echo -e "${GREEN}✅ Database volume exists - data will be preserved${NC}"
+else
+    echo -e "${YELLOW}⚠️  No existing database volume - fresh database will be created${NC}"
 fi
 
 # Build profiles command - ใช้ development profile (รวม n8n แล้ว)
@@ -153,7 +181,7 @@ if [ "$LOGS" = true ]; then
     
     # Wait for services to be ready
     echo -e "${BLUE}⏳ Waiting for services to be ready...${NC}"
-    sleep 5
+    sleep 10
     
     # Show service URLs
     echo -e "\n${BLUE}🌐 Service URLs:${NC}"
@@ -168,27 +196,42 @@ if [ "$LOGS" = true ]; then
     echo -e "${BLUE}🔍 Service Status:${NC}"
     
     # Check API
-    if curl -f http://localhost:${API_PORT:-3000}/api &> /dev/null; then
-        echo -e "  📱 API: ${GREEN}✅ Ready${NC}"
-    else
-        echo -e "  📱 API: ${YELLOW}⏳ Starting...${NC}"
+    RETRY_COUNT=0
+    MAX_RETRIES=30
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if curl -f -s http://localhost:${API_PORT:-3000}/api &> /dev/null; then
+            echo -e "  📱 API: ${GREEN}✅ Ready${NC}"
+            break
+        else
+            if [ $RETRY_COUNT -eq 0 ]; then
+                echo -e "  📱 API: ${YELLOW}⏳ Starting... (this may take a minute)${NC}"
+            fi
+            sleep 2
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+        fi
+    done
+    
+    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+        echo -e "  📱 API: ${RED}❌ Failed to start${NC}"
     fi
     
     # Check PGAdmin
-    if curl -f http://localhost:${PGADMIN_PORT:-5050} &> /dev/null; then
+    if curl -f -s http://localhost:${PGADMIN_PORT:-5050} &> /dev/null; then
         echo -e "  🗄️  PGAdmin: ${GREEN}✅ Ready${NC}"
     else
         echo -e "  🗄️  PGAdmin: ${YELLOW}⏳ Starting...${NC}"
     fi
     
     # Check n8n
-    if curl -f http://localhost:${N8N_PORT:-5678} &> /dev/null; then
+    if curl -f -s http://localhost:${N8N_PORT:-5678} &> /dev/null; then
         echo -e "  🔧 n8n: ${GREEN}✅ Ready${NC}"
     else
         echo -e "  🔧 n8n: ${YELLOW}⏳ Starting...${NC}"
     fi
     
     echo ""
+    echo -e "${GREEN}🎉 Development environment is ready!${NC}"
+    echo -e "${BLUE}💾 Your database data is preserved between runs${NC}"
     echo -e "${BLUE}📊 Showing logs (Ctrl+C to stop logs, services will continue)...${NC}"
     echo -e "${YELLOW}Tip: Use 'make logs' or 'make n8n-logs' to view specific service logs${NC}"
     echo ""

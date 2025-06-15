@@ -101,321 +101,368 @@ export class OrdersService {
     });
   }
 
-private async sendN8nWebhook(
-  webhookType: 'order' | 'pickup' | 'receipt',
-  orderData: any,
-  customData?: any,
-) {
-  const requestId = `${webhookType}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  let webhookUrl: string | undefined = ''; // 🔥 ประกาศที่นี่
-  
-  try {
+  private async sendN8nWebhook(
+    webhookType: 'order' | 'pickup' | 'receipt',
+    orderData: any,
+    customData?: any,
+  ) {
+    const requestId = `${webhookType}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    let webhookUrl: string | undefined = ''; // 🔥 ประกาศที่นี่
 
-    let payload: any = {};
+    try {
+      let payload: any = {};
+
+      switch (webhookType) {
+        case 'order':
+          webhookUrl = this.configService.get<string>('N8N_WEBHOOK_URL');
+
+          if (!webhookUrl) {
+            console.error(`❌ [${requestId}] N8N_WEBHOOK_URL not configured!`);
+            return {
+              success: false,
+              reason: 'N8N_WEBHOOK_URL not configured',
+              webhookType,
+              requestId,
+            };
+          }
+
+          const customerName = orderData.user
+            ? `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() ||
+              'ລູກຄ້າ'
+            : 'ลูกค้า';
+
+          const items =
+            orderData.order_details?.map((detail) => {
+              const itemName =
+                detail.food_menu?.name ||
+                detail.beverage_menu?.name ||
+                'ບໍ່ລະບຸຊື່';
+
+              return {
+                id: detail.id,
+                name: itemName,
+                quantity: detail.quantity || 1,
+                price: Number(detail.price) || 0,
+                notes: detail.notes || '',
+                isReady: detail.is_ready || false,
+                preparationTime: detail.preparation_time || null,
+                menuType: detail.food_menu ? 'food' : 'beverage',
+                menuId: detail.food_menu_id || detail.beverage_menu_id,
+              };
+            }) || [];
+
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: Number(orderData.total_price) || 0,
+            orderType: orderData.order_type,
+
+            customerInfo: {
+              name: customerName,
+              email: orderData.user?.email || null,
+              phone: orderData.user?.phone || null,
+            },
+
+            items: items,
+
+            tableNumber: orderData.table?.number || null,
+            tableId: orderData.table?.id || null,
+
+            deliveryAddress: orderData.delivery?.delivery_address || null,
+            deliveryInfo: orderData.delivery
+              ? {
+                  address: orderData.delivery.delivery_address,
+                  customerLatitude: orderData.delivery.customer_latitude,
+                  customerLongitude: orderData.delivery.customer_longitude,
+                  customerLocationNote:
+                    orderData.delivery.customer_location_note,
+                  deliveryFee: orderData.delivery.delivery_fee,
+                  estimatedDeliveryTime:
+                    orderData.delivery.estimated_delivery_time,
+                }
+              : null,
+
+            estimatedReadyTime: orderData.estimated_ready_time,
+            actualReadyTime: orderData.actual_ready_time,
+            createdAt: orderData.create_at,
+
+            promotionInfo: orderData.promotion
+              ? {
+                  id: orderData.promotion.id,
+                  name: orderData.promotion.name,
+                  discountAmount: orderData.discount_amount || 0,
+                }
+              : null,
+
+            preparationNotes: orderData.preparation_notes || null,
+            pickupCode: orderData.pickup_code || null,
+
+            timestamp: new Date().toISOString(),
+            requestId: requestId,
+            source: 'seeu-cafe-backend',
+          };
+
+          break;
+
+        case 'pickup':
+          webhookUrl = this.configService.get<string>('N8N_PICKUP_WEBHOOK_URL');
+
+          if (!webhookUrl) {
+            console.error(
+              `❌ [${requestId}] N8N_PICKUP_WEBHOOK_URL not configured!`,
+            );
+            return {
+              success: false,
+              reason: 'N8N_PICKUP_WEBHOOK_URL not configured',
+              webhookType,
+              requestId,
+            };
+          }
+
+          const pickupCustomerName = orderData.user
+            ? `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() ||
+              'ລູກຄ້າ'
+            : 'ລູກຄ້າ';
+
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: Number(orderData.total_price) || 0,
+            orderType: orderData.order_type,
+            pickupCode: orderData.pickup_code,
+            customerInfo: {
+              name: pickupCustomerName,
+              email: orderData.user?.email || null,
+              phone: orderData.user?.phone || null,
+            },
+            estimatedReadyTime: orderData.estimated_ready_time,
+            actualReadyTime: orderData.actual_ready_time,
+            timestamp: new Date().toISOString(),
+            requestId: requestId,
+            source: 'seeu-cafe-backend',
+          };
+
+          console.log(`📦 [${requestId}] Pickup payload:`, {
+            orderId: payload.orderId,
+            pickupCode: payload.pickupCode,
+            customerName: payload.customerInfo.name,
+            orderType: payload.orderType,
+          });
+
+          break;
+
+        case 'receipt':
+          webhookUrl = this.configService.get<string>(
+            'N8N_RECEIPT_WEBHOOK_URL',
+          );
+
+          if (!webhookUrl) {
+            console.error(
+              `❌ [${requestId}] N8N_RECEIPT_WEBHOOK_URL not configured!`,
+            );
+            return {
+              success: false,
+              reason: 'N8N_RECEIPT_WEBHOOK_URL not configured',
+              webhookType,
+              requestId,
+            };
+          }
+
+          const receiptCustomerName = orderData.user
+            ? `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() ||
+              'ລູກຄ້າ'
+            : 'ລູກຄ້າ';
+
+          const receiptItems =
+            orderData.order_details?.map((detail) => ({
+              name:
+                detail.food_menu?.name ||
+                detail.beverage_menu?.name ||
+                'ບໍ່ລະບຸຊື່',
+              quantity: detail.quantity || 1,
+              price: Number(detail.price) || 0,
+              notes: detail.notes || '',
+            })) || [];
+
+          payload = {
+            orderId: orderData.order_id,
+            userId: orderData.User_id,
+            status: orderData.status,
+            totalPrice: Number(orderData.total_price) || 0,
+            orderType: orderData.order_type,
+            customerInfo: {
+              name: receiptCustomerName,
+              email: orderData.user?.email || null,
+              phone: orderData.user?.phone || null,
+            },
+            items: receiptItems,
+            paymentMethod: orderData.payments?.[0]?.method || null,
+            paidAt: orderData.payments?.[0]?.payment_date || null,
+            completedAt: new Date().toISOString(),
+            timestamp: new Date().toISOString(),
+            requestId: requestId,
+            source: 'seeu-cafe-backend',
+          };
+
+          console.log(`📦 [${requestId}] Receipt payload:`, {
+            orderId: payload.orderId,
+            totalPrice: payload.totalPrice,
+            customerName: payload.customerInfo.name,
+            itemsCount: payload.items.length,
+            orderType: payload.orderType,
+          });
+
+          break;
+      }
+
+      const validation = this.validateWebhookPayload(payload, webhookType);
+      if (!validation.isValid) {
+        console.error(
+          `❌ [${requestId}] Invalid webhook payload:`,
+          validation.errors,
+        );
+        console.error(
+          `❌ [${requestId}] Payload that failed validation:`,
+          JSON.stringify(payload, null, 2),
+        );
+        return {
+          success: false,
+          reason: 'Invalid payload',
+          errors: validation.errors,
+          webhookType,
+          requestId,
+          payload: payload,
+        };
+      }
+
+      console.log(`🔔 [${requestId}] Sending ${webhookType} webhook to n8n:`, {
+        url: webhookUrl,
+        orderId: orderData.order_id,
+        requestId,
+        payloadSize: JSON.stringify(payload).length,
+        timestamp: new Date().toISOString(),
+      });
+
+      const response = await this.httpService.axiosRef.post(
+        webhookUrl,
+        payload,
+        {
+          timeout: 15000,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Webhook-Source': 'seeu-cafe-backend',
+            'X-Request-ID': requestId,
+            'X-Order-ID': orderData.order_id,
+            'X-Webhook-Type': webhookType,
+            'User-Agent': 'SeeU-Cafe-Backend/1.0',
+          },
+        },
+      );
+
+      console.log(
+        `✅ [${requestId}] N8N ${webhookType} webhook sent successfully:`,
+        {
+          orderId: orderData.order_id,
+          requestId,
+          status: response.status,
+          statusText: response.statusText,
+          responseSuccess: response.data?.success,
+          responseMessage: response.data?.message,
+          timestamp: new Date().toISOString(),
+        },
+      );
+
+      return {
+        success: true,
+        webhookType,
+        requestId,
+        status: response.status,
+        response: response.data,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error(
+        `❌ [${requestId}] Failed to send ${webhookType} webhook to n8n:`,
+        {
+          orderId: orderData.order_id,
+          requestId,
+          error: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          responseData: error.response?.data,
+          webhookType,
+          url: webhookUrl, // 🔥 ใช้ webhookUrl ที่ประกาศไว้ข้างบน
+          isTimeoutError: error.code === 'ECONNABORTED',
+          isNetworkError: error.code === 'ECONNREFUSED',
+          timestamp: new Date().toISOString(),
+        },
+      );
+
+      return {
+        success: false,
+        webhookType,
+        requestId,
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data,
+        errorCode: error.code,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  private validateWebhookPayload(payload: any, webhookType: string) {
+    const errors: string[] = [];
+
+    if (!payload.orderId) errors.push('orderId is required');
+    if (!payload.totalPrice || payload.totalPrice <= 0)
+      errors.push('totalPrice must be greater than 0');
+    if (!payload.orderType) errors.push('orderType is required');
+    if (!payload.customerInfo?.name)
+      errors.push('customerInfo.name is required');
 
     switch (webhookType) {
       case 'order':
-        webhookUrl = this.configService.get<string>('N8N_WEBHOOK_URL');
-        
-        if (!webhookUrl) {
-          console.error(`❌ [${requestId}] N8N_WEBHOOK_URL not configured!`);
-          return {
-            success: false,
-            reason: 'N8N_WEBHOOK_URL not configured',
-            webhookType,
-            requestId
-          };
+        if (
+          !payload.items ||
+          !Array.isArray(payload.items) ||
+          payload.items.length === 0
+        ) {
+          errors.push('items array is required and must not be empty');
+        } else {
+          payload.items.forEach((item: any, index: number) => {
+            if (!item.name) errors.push(`items[${index}].name is required`);
+            if (!item.quantity || item.quantity <= 0)
+              errors.push(`items[${index}].quantity must be greater than 0`);
+            if (item.price === undefined || item.price < 0)
+              errors.push(`items[${index}].price must be >= 0`);
+          });
         }
-
-        const customerName = orderData.user ? 
-          `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() || 'ລູກຄ້າ' : 
-          'ลูกค้า';
-
-        const items = orderData.order_details?.map(detail => {
-          const itemName = detail.food_menu?.name || detail.beverage_menu?.name || 'ບໍ່ລະບຸຊື່';
-          
-          return {
-            id: detail.id,
-            name: itemName,
-            quantity: detail.quantity || 1,
-            price: Number(detail.price) || 0,
-            notes: detail.notes || '',
-            isReady: detail.is_ready || false,
-            preparationTime: detail.preparation_time || null,
-            menuType: detail.food_menu ? 'food' : 'beverage',
-            menuId: detail.food_menu_id || detail.beverage_menu_id
-          };
-        }) || [];
-
-        payload = {
-          orderId: orderData.order_id,
-          userId: orderData.User_id,
-          status: orderData.status,
-          totalPrice: Number(orderData.total_price) || 0,
-          orderType: orderData.order_type,
-          
-          customerInfo: {
-            name: customerName,
-            email: orderData.user?.email || null,
-            phone: orderData.user?.phone || null,
-          },
-          
-          items: items,
-          
-          tableNumber: orderData.table?.number || null,
-          tableId: orderData.table?.id || null,
-          
-          deliveryAddress: orderData.delivery?.delivery_address || null,
-          deliveryInfo: orderData.delivery ? {
-            address: orderData.delivery.delivery_address,
-            customerLatitude: orderData.delivery.customer_latitude,
-            customerLongitude: orderData.delivery.customer_longitude,
-            customerLocationNote: orderData.delivery.customer_location_note,
-            deliveryFee: orderData.delivery.delivery_fee,
-            estimatedDeliveryTime: orderData.delivery.estimated_delivery_time
-          } : null,
-          
-          estimatedReadyTime: orderData.estimated_ready_time,
-          actualReadyTime: orderData.actual_ready_time,
-          createdAt: orderData.create_at,
-          
-          promotionInfo: orderData.promotion ? {
-            id: orderData.promotion.id,
-            name: orderData.promotion.name,
-            discountAmount: orderData.discount_amount || 0
-          } : null,
-          
-          preparationNotes: orderData.preparation_notes || null,
-          pickupCode: orderData.pickup_code || null,
-          
-          timestamp: new Date().toISOString(),
-          requestId: requestId,
-          source: 'seeu-cafe-backend'
-        };
-
         break;
 
       case 'pickup':
-        webhookUrl = this.configService.get<string>('N8N_PICKUP_WEBHOOK_URL');
-        
-        if (!webhookUrl) {
-          console.error(`❌ [${requestId}] N8N_PICKUP_WEBHOOK_URL not configured!`);
-          return {
-            success: false,
-            reason: 'N8N_PICKUP_WEBHOOK_URL not configured',
-            webhookType,
-            requestId
-          };
-        }
-
-        const pickupCustomerName = orderData.user ? 
-          `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() || 'ລູກຄ້າ' : 
-          'ລູກຄ້າ';
-
-        payload = {
-          orderId: orderData.order_id,
-          userId: orderData.User_id,
-          status: orderData.status,
-          totalPrice: Number(orderData.total_price) || 0,
-          orderType: orderData.order_type,
-          pickupCode: orderData.pickup_code,
-          customerInfo: {
-            name: pickupCustomerName,
-            email: orderData.user?.email || null,
-            phone: orderData.user?.phone || null,
-          },
-          estimatedReadyTime: orderData.estimated_ready_time,
-          actualReadyTime: orderData.actual_ready_time,
-          timestamp: new Date().toISOString(),
-          requestId: requestId,
-          source: 'seeu-cafe-backend'
-        };
-
-        console.log(`📦 [${requestId}] Pickup payload:`, {
-          orderId: payload.orderId,
-          pickupCode: payload.pickupCode,
-          customerName: payload.customerInfo.name,
-          orderType: payload.orderType
-        });
-
+        if (!payload.pickupCode)
+          errors.push('pickupCode is required for pickup webhook');
         break;
 
       case 'receipt':
-        webhookUrl = this.configService.get<string>('N8N_RECEIPT_WEBHOOK_URL');
-        
-        if (!webhookUrl) {
-          console.error(`❌ [${requestId}] N8N_RECEIPT_WEBHOOK_URL not configured!`);
-          return {
-            success: false,
-            reason: 'N8N_RECEIPT_WEBHOOK_URL not configured',
-            webhookType,
-            requestId
-          };
+        if (
+          !payload.items ||
+          !Array.isArray(payload.items) ||
+          payload.items.length === 0
+        ) {
+          errors.push('items array is required for receipt webhook');
         }
-
-        const receiptCustomerName = orderData.user ? 
-          `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() || 'ລູກຄ້າ' : 
-          'ລູກຄ້າ';
-
-        const receiptItems = orderData.order_details?.map(detail => ({
-          name: detail.food_menu?.name || detail.beverage_menu?.name || 'ບໍ່ລະບຸຊື່',
-          quantity: detail.quantity || 1,
-          price: Number(detail.price) || 0,
-          notes: detail.notes || '',
-        })) || [];
-
-        payload = {
-          orderId: orderData.order_id,
-          userId: orderData.User_id,
-          status: orderData.status,
-          totalPrice: Number(orderData.total_price) || 0,
-          orderType: orderData.order_type,
-          customerInfo: {
-            name: receiptCustomerName,
-            email: orderData.user?.email || null,
-            phone: orderData.user?.phone || null,
-          },
-          items: receiptItems,
-          paymentMethod: orderData.payments?.[0]?.method || null,
-          paidAt: orderData.payments?.[0]?.payment_date || null,
-          completedAt: new Date().toISOString(),
-          timestamp: new Date().toISOString(),
-          requestId: requestId,
-          source: 'seeu-cafe-backend'
-        };
-
-        console.log(`📦 [${requestId}] Receipt payload:`, {
-          orderId: payload.orderId,
-          totalPrice: payload.totalPrice,
-          customerName: payload.customerInfo.name,
-          itemsCount: payload.items.length,
-          orderType: payload.orderType
-        });
-
         break;
     }
 
-    const validation = this.validateWebhookPayload(payload, webhookType);
-    if (!validation.isValid) {
-      console.error(`❌ [${requestId}] Invalid webhook payload:`, validation.errors);
-      console.error(`❌ [${requestId}] Payload that failed validation:`, JSON.stringify(payload, null, 2));
-      return {
-        success: false,
-        reason: 'Invalid payload',
-        errors: validation.errors,
-        webhookType,
-        requestId,
-        payload: payload
-      };
-    }
-
-    console.log(`🔔 [${requestId}] Sending ${webhookType} webhook to n8n:`, {
-      url: webhookUrl,
-      orderId: orderData.order_id,
-      requestId,
-      payloadSize: JSON.stringify(payload).length,
-      timestamp: new Date().toISOString()
-    });
-
-    const response = await this.httpService.axiosRef.post(
-      webhookUrl,
-      payload,
-      {
-        timeout: 15000,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Source': 'seeu-cafe-backend',
-          'X-Request-ID': requestId,
-          'X-Order-ID': orderData.order_id,
-          'X-Webhook-Type': webhookType,
-          'User-Agent': 'SeeU-Cafe-Backend/1.0'
-        },
-      },
-    );
-
-    console.log(`✅ [${requestId}] N8N ${webhookType} webhook sent successfully:`, {
-      orderId: orderData.order_id,
-      requestId,
-      status: response.status,
-      statusText: response.statusText,
-      responseSuccess: response.data?.success,
-      responseMessage: response.data?.message,
-      timestamp: new Date().toISOString()
-    });
-
     return {
-      success: true,
-      webhookType,
-      requestId,
-      status: response.status,
-      response: response.data,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    console.error(`❌ [${requestId}] Failed to send ${webhookType} webhook to n8n:`, {
-      orderId: orderData.order_id,
-      requestId,
-      error: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      responseData: error.response?.data,
-      webhookType,
-      url: webhookUrl, // 🔥 ใช้ webhookUrl ที่ประกาศไว้ข้างบน
-      isTimeoutError: error.code === 'ECONNABORTED',
-      isNetworkError: error.code === 'ECONNREFUSED',
-      timestamp: new Date().toISOString()
-    });
-
-    return {
-      success: false,
-      webhookType,
-      requestId,
-      error: error.message,
-      status: error.response?.status,
-      responseData: error.response?.data,
-      errorCode: error.code,
-      timestamp: new Date().toISOString()
+      isValid: errors.length === 0,
+      errors,
     };
   }
-}
-
-private validateWebhookPayload(payload: any, webhookType: string) {
-  const errors: string[] = [];
-  
-  if (!payload.orderId) errors.push('orderId is required');
-  if (!payload.totalPrice || payload.totalPrice <= 0) errors.push('totalPrice must be greater than 0');
-  if (!payload.orderType) errors.push('orderType is required');
-  if (!payload.customerInfo?.name) errors.push('customerInfo.name is required');
-  
-  switch (webhookType) {
-    case 'order':
-      if (!payload.items || !Array.isArray(payload.items) || payload.items.length === 0) {
-        errors.push('items array is required and must not be empty');
-      } else {
-        payload.items.forEach((item: any, index: number) => {
-          if (!item.name) errors.push(`items[${index}].name is required`);
-          if (!item.quantity || item.quantity <= 0) errors.push(`items[${index}].quantity must be greater than 0`);
-          if (item.price === undefined || item.price < 0) errors.push(`items[${index}].price must be >= 0`);
-        });
-      }
-      break;
-      
-    case 'pickup':
-      if (!payload.pickupCode) errors.push('pickupCode is required for pickup webhook');
-      break;
-      
-    case 'receipt':
-      if (!payload.items || !Array.isArray(payload.items) || payload.items.length === 0) {
-        errors.push('items array is required for receipt webhook');
-      }
-      break;
-  }
-  
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-}
 
   async create(createOrderDto: CreateOrderDto): Promise<OrderWithRelations> {
     console.log(
@@ -744,25 +791,23 @@ private validateWebhookPayload(payload: any, webhookType: string) {
             : undefined,
         );
       }
+      console.log('🚀 [ORDER_CREATE] Attempting to send webhook...');
 
+      try {
+        const lineResult = await this.sendLineNotificationDirect(createdOrder);
+      } catch (lineError) {
+        console.error('❌ [ORDER_CREATE] Line notification exception:', {
+          error: lineError.message,
+          stack: lineError.stack,
+        });
+      }
       await this.customerNotificationsService.create({
         message: `ມີຄຳສັ່ງຊື້ໃໝ່ #${uniqueOrderId} (${orderData.order_type})`,
         type: 'new_order',
         order_id: order.id,
-        target_roles: ['admin', 'employee'],
+        target_roles: ['admin', 'staff'],
         action_url: `/admin/orders/${order.id}`,
       });
-    console.log('🚀 [ORDER_CREATE] Attempting to send webhook...');
-    
-     try {
-      /* const lineResult = await this.sendLineNotificationDirect(createdOrder); */
-      
-    } catch (lineError) {
-      console.error('❌ [ORDER_CREATE] Line notification exception:', {
-        error: lineError.message,
-        stack: lineError.stack
-      });
-    }
     } catch (notificationError) {
       console.error(
         'Failed to send order creation notifications:',
@@ -772,129 +817,148 @@ private validateWebhookPayload(payload: any, webhookType: string) {
 
     const finalResult = await this.findOne(order.id);
 
-     console.log('✅ [ORDER_CREATE] Order creation completed:', {
-    orderId: finalResult.order_id,
-    id: finalResult.id,
-    totalPrice: finalResult.total_price
-  });
+    console.log('✅ [ORDER_CREATE] Order creation completed:', {
+      orderId: finalResult.order_id,
+      id: finalResult.id,
+      totalPrice: finalResult.total_price,
+    });
     return finalResult;
   }
 
   private async sendLineNotificationDirect(orderData: any) {
-  try {
-    const lineToken = this.configService.get<string>('LINE_CHANNEL_ACCESS_TOKEN');
-    const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
-    
-    if (!lineToken || !lineUserId) {
-      console.warn('Line credentials not configured');
-      return {
-        success: false,
-        via: 'line',
-        error: 'Line credentials not configured'
-      };
-    }
+    try {
+      const lineToken = this.configService.get<string>(
+        'LINE_CHANNEL_ACCESS_TOKEN',
+      );
+      const lineUserId = this.configService.get<string>('LINE_ADMIN_USER_ID');
 
-    const customerName = orderData.user ? 
-      `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() || 'ລູກຄ້າ' : 
-      'ลูกค้า';
+      if (!lineToken || !lineUserId) {
+        console.warn('Line credentials not configured');
+        return {
+          success: false,
+          via: 'line',
+          error: 'Line credentials not configured',
+        };
+      }
 
-    const itemsList = orderData.order_details?.map(detail => {
-      const itemName = detail.food_menu?.name || detail.beverage_menu?.name || 'ບໍ່ລະບຸຊື່';
-      return `• ${itemName} x${detail.quantity} (₭${detail.price.toLocaleString()})`;
-    }).join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
+      const customerName = orderData.user
+        ? `${orderData.user.first_name || ''} ${orderData.user.last_name || ''}`.trim() ||
+          'ລູກຄ້າ'
+        : 'ลูกค้า';
 
-    const orderTypeText = this.getOrderTypeText(orderData.order_type);
-    
-    let message = `🔔 *ອໍເດີ້ໃໝ່!*
+      const itemsList =
+        orderData.order_details
+          ?.map((detail) => {
+            const itemName =
+              detail.food_menu?.name ||
+              detail.beverage_menu?.name ||
+              'ບໍ່ລະບຸຊື່';
+            return `• ${itemName} x${detail.quantity} (₭${detail.price.toLocaleString()})`;
+          })
+          .join('\n') || '• ບໍ່ມີລາຍການສິນຄ້າ';
+
+      const orderTypeText = this.getOrderTypeText(orderData.order_type);
+
+      let message = `🔔 *ອໍເດີ້ໃໝ່!*
 📋 ລະຫັດ: ${orderData.order_id}
 💰 ຍອດລວມ: ₭${orderData.total_price.toLocaleString()}
 📱 ປະເພດ: ${orderTypeText}
 👤 ລູກຄ້າ: ${customerName}
 📞 ເບີໂທ: ${orderData.user?.phone || 'ບໍ່ລະບຸ'}`;
 
-    if (orderData.table?.number) {
-      message += `\n🪑 ໂຕະ: ${orderData.table.number}`;
-    }
-    
-    if (orderData.delivery?.delivery_address) {
-      message += `\n🚚 ທີ່ຢູ່: ${orderData.delivery.delivery_address}`;
-    }
-
-    message += `\n\n📝 ລາຍການ:\n${itemsList}`;
-
-    if (orderData.estimated_ready_time) {
-      try {
-        const readyTime = new Date(orderData.estimated_ready_time);
-        message += `\n\n⏰ ເວລາແລ້ວໂດຍປະມານ: ${readyTime.toLocaleTimeString('th-TH', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })}`;
-      } catch (error) {
-        console.warn('Invalid estimated ready time:', orderData.estimated_ready_time);
+      if (orderData.table?.number) {
+        message += `\n🪑 ໂຕະ: ${orderData.table.number}`;
       }
-    }
 
-    message += `\n\n✅ ກະລຸນາກຽມອໍເດີ້`;
+      if (orderData.delivery?.delivery_address) {
+        message += `\n🚚 ທີ່ຢູ່: ${orderData.delivery.delivery_address}`;
+      }
 
-    const response = await this.httpService.axiosRef.post(
-      'https://api.line.me/v2/bot/message/push',
-      {
-        to: lineUserId,
-        messages: [
-          {
-            type: 'text',
-            text: message
-          }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${lineToken}`,
-          'Content-Type': 'application/json'
+      message += `\n\n📝 ລາຍການ:\n${itemsList}`;
+
+      if (orderData.estimated_ready_time) {
+        try {
+          const readyTime = new Date(orderData.estimated_ready_time);
+          message += `\n\n⏰ ເວລາແລ້ວໂດຍປະມານ: ${readyTime.toLocaleTimeString(
+            'th-TH',
+            {
+              hour: '2-digit',
+              minute: '2-digit',
+            },
+          )}`;
+        } catch (error) {
+          console.warn(
+            'Invalid estimated ready time:',
+            orderData.estimated_ready_time,
+          );
+        }
+      }
+
+      message += `\n\n✅ ກະລຸນາກຽມອໍເດີ້`;
+
+      const response = await this.httpService.axiosRef.post(
+        'https://api.line.me/v2/bot/message/push',
+        {
+          to: lineUserId,
+          messages: [
+            {
+              type: 'text',
+              text: message,
+            },
+          ],
         },
-        timeout: 10000
-      }
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${lineToken}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        },
+      );
 
-    console.log(`✅ Line notification sent successfully:`, {
-      orderId: orderData.order_id,
-      responseStatus: response.status,
-      messageLength: message.length,
-    });
+      console.log(`✅ Line notification sent successfully:`, {
+        orderId: orderData.order_id,
+        responseStatus: response.status,
+        messageLength: message.length,
+      });
 
-    return { 
-      success: true, 
-      via: 'line-direct',
-      messageId: response.data?.sentMessages?.[0]?.id || 'unknown',
-      messageLength: message.length,
-      timestamp: new Date().toISOString()
-    };
+      return {
+        success: true,
+        via: 'line-direct',
+        messageId: response.data?.sentMessages?.[0]?.id || 'unknown',
+        messageLength: message.length,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error(`❌ Failed to send Line notification:`, {
+        orderId: orderData.order_id,
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
 
-  } catch (error) {
-    console.error(`❌ Failed to send Line notification:`, {
-      orderId: orderData.order_id,
-      error: error.message,
-      status: error.response?.status,
-      data: error.response?.data,
-    });
-    
-    return {
-      success: false,
-      via: 'line-direct',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    };
+      return {
+        success: false,
+        via: 'line-direct',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
-}
-private getOrderTypeText(orderType: string): string {
-  switch (orderType) {
-    case 'pickup': return 'ຮັບເອງ';
-    case 'delivery': return 'ຈັດສົ່ງ';
-    case 'table': return 'ກິນທີ່ຮ້ານ';
-    case 'dine-in': return 'ກິນທີ່ຮ້ານ';
-    default: return orderType;
+  private getOrderTypeText(orderType: string): string {
+    switch (orderType) {
+      case 'pickup':
+        return 'ຮັບເອງ';
+      case 'delivery':
+        return 'ຈັດສົ່ງ';
+      case 'table':
+        return 'ກິນທີ່ຮ້ານ';
+      case 'dine-in':
+        return 'ກິນທີ່ຮ້ານ';
+      default:
+        return orderType;
+    }
   }
-}
   async completeTableOrder(orderId: number): Promise<void> {
     const order = await this.findOne(orderId);
 
@@ -928,7 +992,7 @@ private getOrderTypeText(orderType: string): string {
             message: `ໂຕະ #${table.number} ຫວ່າງແລ້ວ - ອໍເດີ້ #${order.order_id} ສຳເລັດ`,
             type: 'table_available',
             order_id: orderId,
-            target_roles: ['admin', 'employee'],
+            target_roles: ['admin', 'staff'],
             action_url: `/admin/tables/${order.table_id}`,
           });
         } catch (notificationError) {
@@ -976,14 +1040,38 @@ private getOrderTypeText(orderType: string): string {
 
     if (['completed', 'delivered'].includes(status)) {
       await this.completeTableOrder(id);
+
       try {
-      console.log(`🚀 Sending receipt webhook for completed order: ${orderData.order_id}`);
-      const completedOrder = await this.findOne(id);
-      const webhookResult = await this.sendN8nWebhook('receipt', completedOrder);
-      console.log(`✅ Receipt webhook result:`, webhookResult);
-    } catch (webhookError) {
-      console.error('❌ Receipt webhook failed:', webhookError);
-    }
+        console.log(
+          `🔥 Order ${orderData.order_id} completed, checking payment status...`,
+        );
+
+        // Get the updated order with payment information
+        const completedOrder = await this.findOne(id);
+
+        // Check if there's a completed payment
+        const hasCompletedPayment = completedOrder.payments?.some(
+          (p) => p.status === 'completed',
+        );
+
+        if (hasCompletedPayment) {
+          console.log(
+            `✅ Order ${orderData.order_id} has completed payment, sending receipt...`,
+          );
+
+          const webhookResult = await this.sendN8nWebhook(
+            'receipt',
+            completedOrder,
+          );
+          console.log(`📧 Receipt webhook result:`, webhookResult);
+        } else {
+          console.log(
+            `⏳ Order ${orderData.order_id} completed but payment not yet completed, receipt will be sent after payment`,
+          );
+        }
+      } catch (webhookError) {
+        console.error('❌ Receipt webhook failed:', webhookError);
+      }
     }
 
     if (orderData.order_type === 'delivery' && status === 'in_delivery') {
@@ -1022,7 +1110,7 @@ private getOrderTypeText(orderType: string): string {
           message: `ຄຳສັ່ງຊື້ #${updatedOrder.order_id} ປ່ຽນສະຖານະເປັນ: ${status}`,
           type: 'order_update',
           order_id: id,
-          target_roles: ['admin', 'employee'],
+          target_roles: ['admin', 'staff'],
           action_url: `/admin/orders/${id}`,
         });
       }
@@ -1041,8 +1129,10 @@ private getOrderTypeText(orderType: string): string {
 
   async triggerSalesReport(reportType: 'daily' | 'weekly' | 'monthly') {
     try {
-      const salesWebhookUrl = this.configService.get<string>('N8N_SALES_WEBHOOK_URL');
-      
+      const salesWebhookUrl = this.configService.get<string>(
+        'N8N_SALES_WEBHOOK_URL',
+      );
+
       if (!salesWebhookUrl) {
         throw new Error('N8N sales webhook URL not configured');
       }
@@ -1053,7 +1143,11 @@ private getOrderTypeText(orderType: string): string {
 
       switch (reportType) {
         case 'daily':
-          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          startDate = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+          );
           break;
         case 'weekly':
           const weekStart = now.getDate() - now.getDay();
@@ -1085,21 +1179,25 @@ private getOrderTypeText(orderType: string): string {
         },
       });
 
-      const totalSales = salesData.reduce((sum, order) => sum + order.total_price, 0);
+      const totalSales = salesData.reduce(
+        (sum, order) => sum + order.total_price,
+        0,
+      );
       const totalOrders = salesData.length;
 
       const itemCounts = {};
-      salesData.forEach(order => {
-        order.order_details.forEach(detail => {
+      salesData.forEach((order) => {
+        order.order_details.forEach((detail) => {
           const itemName = detail.food_menu?.name || detail.beverage_menu?.name;
           if (itemName) {
-            itemCounts[itemName] = (itemCounts[itemName] || 0) + detail.quantity;
+            itemCounts[itemName] =
+              (itemCounts[itemName] || 0) + detail.quantity;
           }
         });
       });
 
       const topItems = Object.entries(itemCounts)
-        .sort(([,a], [,b]) => (b as number) - (a as number))
+        .sort(([, a], [, b]) => (b as number) - (a as number))
         .slice(0, 5)
         .map(([name, count]) => ({ name, count }));
 
@@ -1448,7 +1546,6 @@ private getOrderTypeText(orderType: string): string {
     return result;
   }
 
-
   async updateTime(
     id: number,
     updateTimeDto: UpdateTimeDto,
@@ -1667,13 +1764,13 @@ private getOrderTypeText(orderType: string): string {
     await this.cacheManager.del(`order:${id}`);
 
     const result = await this.findOne(id);
- try {
-    console.log(`🚀 Sending pickup webhook for order: ${result.order_id}`);
-    const webhookResult = await this.sendN8nWebhook('pickup', result);
-    console.log(`✅ Pickup webhook result:`, webhookResult);
-  } catch (webhookError) {
-    console.error('❌ Pickup webhook failed:', webhookError);
-  }
+    try {
+      console.log(`🚀 Sending pickup webhook for order: ${result.order_id}`);
+      const webhookResult = await this.sendN8nWebhook('pickup', result);
+      console.log(`✅ Pickup webhook result:`, webhookResult);
+    } catch (webhookError) {
+      console.error('❌ Pickup webhook failed:', webhookError);
+    }
     return result;
   }
 

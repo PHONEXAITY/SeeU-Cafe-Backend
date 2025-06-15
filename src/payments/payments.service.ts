@@ -7,14 +7,109 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { PaymentsGateway } from './payments.gateway';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentsGateway: PaymentsGateway,
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
   ) {}
+  private async triggerReceiptWebhook(payment: any) {
+    try {
+      const receiptWebhookUrl = this.configService.get<string>(
+        'N8N_RECEIPT_WEBHOOK_URL',
+      );
 
+      if (!receiptWebhookUrl) {
+        console.warn(
+          'N8N_RECEIPT_WEBHOOK_URL not configured, skipping receipt',
+        );
+        return;
+      }
+
+      // Prepare receipt payload
+      const receiptPayload = {
+        orderId: payment.order.order_id,
+        userId: payment.order.User_id,
+        status: payment.order.status,
+        totalPrice: Number(payment.order.total_price) || 0,
+        orderType: payment.order.order_type,
+        customerInfo: {
+          name: payment.order.user
+            ? `${payment.order.user.first_name || ''} ${payment.order.user.last_name || ''}`.trim() ||
+              'ລູກຄ້າ'
+            : 'ລູກຄ້າ',
+          email: payment.order.user?.email || null,
+          phone: payment.order.user?.phone || null,
+        },
+        items:
+          payment.order.order_details?.map((detail) => ({
+            name:
+              detail.food_menu?.name ||
+              detail.beverage_menu?.name ||
+              'ບໍ່ລະບຸຊື່',
+            quantity: detail.quantity || 1,
+            price: Number(detail.price) || 0,
+            notes: detail.notes || '',
+          })) || [],
+        paymentMethod: payment.method,
+        paidAt: payment.payment_date?.toISOString() || new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        requestId: `receipt_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        source: 'seeu-cafe-payments',
+      };
+
+      console.log(
+        `📧 Triggering receipt webhook for order: ${payment.order.order_id}`,
+      );
+
+      const response = await this.httpService.axiosRef.post(
+        receiptWebhookUrl,
+        receiptPayload,
+        {
+          timeout: 15000,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Webhook-Source': 'seeu-cafe-payments',
+            'X-Request-ID': receiptPayload.requestId,
+            'X-Order-ID': payment.order.order_id,
+            'User-Agent': 'SeeU-Cafe-Payments/1.0',
+          },
+        },
+      );
+
+      console.log(`✅ Receipt webhook sent successfully:`, {
+        orderId: payment.order.order_id,
+        status: response.status,
+        success: response.data?.success,
+        messageId: response.data?.messageId,
+      });
+
+      return {
+        success: true,
+        response: response.data,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error(`❌ Failed to send receipt webhook:`, {
+        orderId: payment.order.order_id,
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+
+      return {
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
   async create(createPaymentDto: CreatePaymentDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: createPaymentDto.order_id },
@@ -59,6 +154,13 @@ export class PaymentsService {
     if (payment.status === 'completed') {
       await this.updateOrderAndTimeline(payment);
       await this.notifyCustomer(payment);
+      // 🔥 NEW: Trigger receipt if order is completed
+      if (['completed', 'delivered'].includes(payment.order.status)) {
+        console.log(
+          `🔥 Payment created as completed for finished order, triggering receipt...`,
+        );
+        await this.triggerReceiptWebhook(payment);
+      }
     }
 
     return {
@@ -165,6 +267,13 @@ export class PaymentsService {
 
     await this.updateOrderAndTimeline(updatedPayment);
     await this.notifyCustomer(updatedPayment);
+    // 🔥 NEW: Trigger receipt if order is completed
+    if (['completed', 'delivered'].includes(updatedPayment.order.status)) {
+      console.log(
+        `🔥 Payment approved for completed order, triggering receipt...`,
+      );
+      await this.triggerReceiptWebhook(updatedPayment);
+    }
     void this.paymentsGateway.broadcastPaymentStatusUpdate(id, 'completed');
 
     return {
@@ -309,6 +418,13 @@ export class PaymentsService {
     ) {
       await this.updateOrderAndTimeline(payment);
       await this.notifyCustomer(payment);
+      // 🔥 NEW: Trigger receipt if order is completed
+      if (['completed', 'delivered'].includes(payment.order.status)) {
+        console.log(
+          `🔥 Payment updated to completed for finished order, triggering receipt...`,
+        );
+        await this.triggerReceiptWebhook(payment);
+      }
     }
 
     if (
