@@ -238,7 +238,61 @@ model MenuCategory {
   @@index([status])
   @@index([type])
 }
+model CombinedBill {
+  id          Int      @id @default(autoincrement())
+  bill_id     String   @unique
+  status      String   @default("pending") // pending, paid, cancelled
+  total_amount Float
+  service_charge Float? @default(0)
+  final_amount Float
+  payment_method String?
+  customer_name String?
+  notes       String?
+  created_at  DateTime @default(now())
+  paid_at     DateTime?
+  created_by  Int?     // employee who created the bill
+  
+  // Relations
+  table_bills TableBill[]
+  payments    CombinedBillPayment[]
+  
+  @@index([status])
+  @@index([created_at])
+}
 
+model TableBill {
+  id              Int     @id @default(autoincrement())
+  combined_bill_id Int
+  table_id        Int
+  table_number    Int
+  subtotal        Float
+  orders_included Json    // array of order IDs included
+  
+  // Relations
+  combined_bill   CombinedBill @relation(fields: [combined_bill_id], references: [id], onDelete: Cascade)
+  table          Table        @relation(fields: [table_id], references: [id])
+  
+  @@index([combined_bill_id])
+  @@index([table_id])
+}
+
+model CombinedBillPayment {
+  id              Int      @id @default(autoincrement())
+  combined_bill_id Int
+  payment_id      BigInt   @unique
+  amount          Float
+  method          String
+  payment_date    DateTime @default(now())
+  status          String   @default("completed")
+  notes           String?
+  table_reference String?  // reference to specific table if split payment
+  
+  // Relations
+  combined_bill   CombinedBill @relation(fields: [combined_bill_id], references: [id], onDelete: Cascade)
+  
+  @@index([combined_bill_id])
+  @@index([status])
+}
 model Table {
   id                    Int       @id @default(autoincrement())
   number                Int       @unique
@@ -250,6 +304,7 @@ model Table {
   current_session_start DateTime?
   expected_end_time     DateTime?
   orders                Order[]
+  table_bills          TableBill[]
 
   @@index([status])
 }

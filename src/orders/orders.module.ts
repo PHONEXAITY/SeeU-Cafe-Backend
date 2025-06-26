@@ -11,6 +11,8 @@ import { OrderHistoryService } from './order-history/order-history.service';
 import { OrderHistoryController } from './order-history/order-history.controller';
 // Sales Reports
 import { SalesReportController } from './controllers/sales-report.controller';
+import { CombinedBillService } from './services/combined-bill.service';
+import { CombinedBillController } from './controllers/combined-bill.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CustomerNotificationsModule } from '../customer-notifications/customer-notifications.module';
 import { HttpModule } from '@nestjs/axios';
@@ -31,6 +33,7 @@ import { HttpModule } from '@nestjs/axios';
     TimeUpdateController,
     OrderHistoryController,
     SalesReportController,
+    CombinedBillController,
   ],
   providers: [
     OrdersService,
@@ -38,6 +41,7 @@ import { HttpModule } from '@nestjs/axios';
     OrderTimelineService,
     TimeUpdateService,
     OrderHistoryService,
+    CombinedBillService,
   ],
   exports: [
     OrdersService,
@@ -45,6 +49,7 @@ import { HttpModule } from '@nestjs/axios';
     OrderTimelineService,
     TimeUpdateService,
     OrderHistoryService,
+    CombinedBillService,
   ],
 })
 export class OrdersModule {}
