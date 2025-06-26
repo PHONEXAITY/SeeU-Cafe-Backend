@@ -69,23 +69,23 @@ export class WebhookController {
 
   constructor(
     private readonly webhookService: WebhookService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
   ) {}
 
   // Test endpoint
   @Get('test')
   test() {
-    return { 
+    return {
       message: 'Webhook endpoints are ready!',
       endpoints: [
         'POST /webhooks/order-notification',
-        'POST /webhooks/sales-report', 
+        'POST /webhooks/sales-report',
         'POST /webhooks/pickup-code',
         'POST /webhooks/receipt',
         'POST /webhooks/table-status',
-        'GET /webhooks/tables-status'
+        'GET /webhooks/tables-status',
       ],
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
   }
 
@@ -93,10 +93,10 @@ export class WebhookController {
   @Post('order-notification')
   async newOrderNotification(
     @Body() payload: OrderWebhookPayload,
-    @Headers() headers: Record<string, string>
+    @Headers() headers: Record<string, string>,
   ) {
     const requestId = Date.now().toString();
-    
+
     this.logger.log(`📥 [${requestId}] New order notification received`, {
       orderId: payload.orderId,
       source: headers['x-webhook-source'] || 'unknown',
@@ -120,12 +120,13 @@ export class WebhookController {
       },
       items: {
         count: payload.items?.length || 0,
-        items: payload.items?.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          hasNotes: !!item.notes,
-        })) || [],
+        items:
+          payload.items?.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            hasNotes: !!item.notes,
+          })) || [],
       },
       orderDetails: {
         tableNumber: payload.tableNumber,
@@ -139,16 +140,18 @@ export class WebhookController {
     // 🔥 แก้ไข: กำหนดประเภทให้ validationErrors อย่างชัดเจน
     const validationErrors: string[] = [];
     if (!payload.orderId) validationErrors.push('orderId is missing');
-    if (!payload.totalPrice || payload.totalPrice <= 0) validationErrors.push('totalPrice is invalid');
+    if (!payload.totalPrice || payload.totalPrice <= 0)
+      validationErrors.push('totalPrice is invalid');
     if (!payload.orderType) validationErrors.push('orderType is missing');
-    if (!payload.items || payload.items.length === 0) validationErrors.push('items array is empty');
+    if (!payload.items || payload.items.length === 0)
+      validationErrors.push('items array is empty');
 
     if (validationErrors.length > 0) {
       this.logger.error(`❌ [${requestId}] Validation failed:`, {
         orderId: payload.orderId,
         errors: validationErrors,
       });
-      
+
       return {
         success: false,
         error: 'Validation failed',
@@ -160,21 +163,26 @@ export class WebhookController {
 
     try {
       this.logger.log(`🔄 [${requestId}] Processing order notification...`);
-      
-      const result = await this.webhookService.sendNewOrderNotification(payload);
-      
-      this.logger.log(`✅ [${requestId}] Order notification processed successfully:`, {
-        orderId: payload.orderId,
-        sent: result.sent,
-        via: result.via,
-        messageId: result.messageId,
-        // 🔥 แก้ไข: ตรวจสอบว่า property มีอยู่จริงก่อนใช้
-        customerName: result.customerName || payload.customerInfo?.name || 'unknown',
-        itemsCount: result.itemsCount || payload.items?.length || 0,
-      });
 
-      return { 
-        success: true, 
+      const result =
+        await this.webhookService.sendNewOrderNotification(payload);
+
+      this.logger.log(
+        `✅ [${requestId}] Order notification processed successfully:`,
+        {
+          orderId: payload.orderId,
+          sent: result.sent,
+          via: result.via,
+          messageId: result.messageId,
+          // 🔥 แก้ไข: ตรวจสอบว่า property มีอยู่จริงก่อนใช้
+          customerName:
+            result.customerName || payload.customerInfo?.name || 'unknown',
+          itemsCount: result.itemsCount || payload.items?.length || 0,
+        },
+      );
+
+      return {
+        success: true,
         message: 'Order notification sent successfully',
         orderId: payload.orderId,
         requestId,
@@ -182,19 +190,24 @@ export class WebhookController {
           sent: result.sent,
           via: result.via,
           messageId: result.messageId,
-          customerName: result.customerName || payload.customerInfo?.name || 'unknown',
+          customerName:
+            result.customerName || payload.customerInfo?.name || 'unknown',
           itemsCount: result.itemsCount || payload.items?.length || 0,
-        }
+        },
       };
     } catch (error) {
-      this.logger.error(`❌ [${requestId}] Failed to send order notification:`, {
-        orderId: payload.orderId,
-        error: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      });
+      this.logger.error(
+        `❌ [${requestId}] Failed to send order notification:`,
+        {
+          orderId: payload.orderId,
+          error: error.message,
+          stack:
+            process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        },
+      );
 
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
         orderId: payload.orderId,
         requestId,
@@ -206,24 +219,24 @@ export class WebhookController {
   @Post('sales-report')
   async salesReport(
     @Body() payload: SalesReportPayload,
-    @Headers('x-webhook-source') source?: string
+    @Headers('x-webhook-source') source?: string,
   ) {
     this.logger.log(`Sales report request: ${payload.reportType}`);
-    
+
     try {
       const result = await this.webhookService.sendSalesReport(payload);
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Sales report sent successfully',
         reportType: payload.reportType,
-        result 
+        result,
       };
     } catch (error) {
       this.logger.error('Failed to send sales report:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        reportType: payload.reportType 
+        reportType: payload.reportType,
       };
     }
   }
@@ -232,25 +245,25 @@ export class WebhookController {
   @Post('pickup-code')
   async pickupCode(
     @Body() payload: OrderWebhookPayload,
-    @Headers('x-webhook-source') source?: string
+    @Headers('x-webhook-source') source?: string,
   ) {
     this.logger.log(`Pickup code request: ${payload.orderId}`);
-    
+
     try {
       const result = await this.webhookService.sendPickupCode(payload);
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Pickup code sent successfully',
         orderId: payload.orderId,
         pickupCode: payload.pickupCode || 'N/A', // 🔥 แก้ไข: ใช้ fallback
-        result 
+        result,
       };
     } catch (error) {
       this.logger.error('Failed to send pickup code:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        orderId: payload.orderId 
+        orderId: payload.orderId,
       };
     }
   }
@@ -259,24 +272,24 @@ export class WebhookController {
   @Post('receipt')
   async receipt(
     @Body() payload: OrderWebhookPayload,
-    @Headers('x-webhook-source') source?: string
+    @Headers('x-webhook-source') source?: string,
   ) {
     this.logger.log(`Receipt request: ${payload.orderId}`);
-    
+
     try {
       const result = await this.webhookService.sendReceipt(payload);
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Receipt sent successfully',
         orderId: payload.orderId,
-        result 
+        result,
       };
     } catch (error) {
       this.logger.error('Failed to send receipt:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        orderId: payload.orderId 
+        orderId: payload.orderId,
       };
     }
   }
@@ -285,25 +298,25 @@ export class WebhookController {
   @Post('table-status')
   async tableStatus(
     @Body() payload: TableStatusPayload,
-    @Headers('x-webhook-source') source?: string
+    @Headers('x-webhook-source') source?: string,
   ) {
     this.logger.log(`Table status update: Table ${payload.tableId}`);
-    
+
     try {
       const result = await this.webhookService.updateTableStatus(payload);
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Table status updated successfully',
         tableId: payload.tableId,
         newStatus: payload.newStatus,
-        result 
+        result,
       };
     } catch (error) {
       this.logger.error('Failed to update table status:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: error.message,
-        tableId: payload.tableId 
+        tableId: payload.tableId,
       };
     }
   }
@@ -315,27 +328,27 @@ export class WebhookController {
       // ใช้ prisma service โดยตรงแทนการเรียก API
       const tables = await this.prisma.table.findMany({
         where: {
-          status: 'occupied'
+          status: 'occupied',
         },
         select: {
           id: true,
           number: true,
           status: true,
           current_session_start: true,
-          expected_end_time: true
-        }
+          expected_end_time: true,
+        },
       });
 
       return {
         success: true,
         tables: tables,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       return {
         success: false,
         error: error.message,
-        tables: []
+        tables: [],
       };
     }
   }

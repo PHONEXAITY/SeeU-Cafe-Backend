@@ -28,7 +28,7 @@ export class BlogCategoriesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new blog category (Admin only)' })
   @ApiResponse({
@@ -67,7 +67,7 @@ export class BlogCategoriesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a blog category (Admin only)' })
   @ApiResponse({
@@ -86,7 +86,7 @@ export class BlogCategoriesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a blog category (Admin only)' })
   @ApiResponse({

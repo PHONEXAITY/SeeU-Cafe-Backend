@@ -98,7 +98,7 @@ export class DocumentsController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiOperation({ summary: 'Get all documents (Admin only)' })
   @ApiResponse({ status: 200, description: 'List of documents' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -136,7 +136,7 @@ export class DocumentsController {
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiOperation({ summary: 'Update a document (Admin only)' })
   @ApiResponse({ status: 200, description: 'Document updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

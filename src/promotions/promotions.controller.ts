@@ -33,7 +33,7 @@ export class PromotionsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new promotion (Admin only)' })
   @ApiResponse({ status: 201, description: 'Promotion created successfully' })
@@ -126,7 +126,7 @@ export class PromotionsController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a promotion (Admin only)' })
   @ApiResponse({ status: 200, description: 'Promotion updated successfully' })
@@ -143,7 +143,7 @@ export class PromotionsController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a promotion (Admin only)' })
   @ApiResponse({ status: 200, description: 'Promotion deleted successfully' })

@@ -71,7 +71,7 @@ export class CloudinaryController {
 
   @Delete(':publicId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete an image from Cloudinary' })
   async deleteImage(@Param('publicId') publicId: string) {

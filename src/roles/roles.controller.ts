@@ -41,6 +41,7 @@ export class RolesController {
   }
 
   @Get()
+  @Roles('admin', 'manager')
   @ApiOperation({ summary: 'Get all roles (Admin only)' })
   @ApiResponse({ status: 200, description: 'List of roles' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -49,6 +50,7 @@ export class RolesController {
   }
 
   @Get(':id')
+  @Roles('admin', 'manager')
   @ApiOperation({ summary: 'Get a role by ID (Admin only)' })
   @ApiResponse({ status: 200, description: 'Role details' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

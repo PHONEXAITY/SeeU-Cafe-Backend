@@ -35,7 +35,7 @@ export class TablesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new table (Admin only)' })
   @ApiResponse({ status: 201, description: 'Table created successfully' })
@@ -78,10 +78,10 @@ export class TablesController {
       capacity ? +capacity : undefined,
     );
   }
-    // 🔥 NEW: Table cleanup endpoints
+  // 🔥 NEW: Table cleanup endpoints
   @Post('cleanup/manual')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Trigger manual table cleanup (Admin only)' })
   @ApiResponse({
@@ -114,15 +114,15 @@ export class TablesController {
   })
   async getTableStatusSummary() {
     const tables = await this.tableCleanupService.getTableStatus();
-    
+
     return {
       total: tables.length,
-      available: tables.filter(t => t.status === 'available').length,
-      occupied: tables.filter(t => t.status === 'occupied').length,
-      maintenance: tables.filter(t => t.status === 'maintenance').length,
-      needsCleanup: tables.filter(t => t.needsCleanup).length,
+      available: tables.filter((t) => t.status === 'available').length,
+      occupied: tables.filter((t) => t.status === 'occupied').length,
+      maintenance: tables.filter((t) => t.status === 'maintenance').length,
+      needsCleanup: tables.filter((t) => t.needsCleanup).length,
       averageSessionDuration: tables
-        .filter(t => t.sessionDuration > 0)
+        .filter((t) => t.sessionDuration > 0)
         .reduce((avg, t, _, arr) => avg + t.sessionDuration / arr.length, 0),
       timestamp: new Date().toISOString(),
     };
@@ -142,23 +142,20 @@ export class TablesController {
 
   @Post(':id/release')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Manually release a table' })
   @ApiResponse({
     status: 201,
     description: 'Table released successfully',
   })
-  async releaseTable(
-    @Param('id') id: string,
-    @Body('reason') reason?: string,
-  ) {
+  async releaseTable(@Param('id') id: string, @Body('reason') reason?: string) {
     return this.tablesService.releaseTable(+id, reason || 'Manual release');
   }
 
   @Post(':id/occupy')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Manually occupy a table' })
   @ApiResponse({
@@ -172,7 +169,7 @@ export class TablesController {
   // 🔥 NEW: Table statistics endpoint
   @Get('statistics')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get table statistics (Admin only)' })
   @ApiQuery({
@@ -220,7 +217,9 @@ export class TablesController {
     status: 200,
     description: 'Tables filtered by status',
   })
-  async getTablesByStatus(@Param('status') status: 'available' | 'occupied' | 'maintenance') {
+  async getTablesByStatus(
+    @Param('status') status: 'available' | 'occupied' | 'maintenance',
+  ) {
     return this.tablesService.getTablesByStatus(status);
   }
 
@@ -248,7 +247,7 @@ export class TablesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a table (Admin only)' })
   @ApiResponse({ status: 200, description: 'Table updated successfully' })
@@ -327,7 +326,7 @@ export class TablesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a table (Admin only)' })
   @ApiResponse({ status: 200, description: 'Table deleted successfully' })

@@ -264,7 +264,7 @@ export class PaymentsController {
 
   @Get(':id/proof')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'staff')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get payment proof' })
   @ApiResponse({ status: 200, description: 'Payment proof details' })
@@ -276,7 +276,7 @@ export class PaymentsController {
 
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'staff')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Approve payment (Admin only)' })
   @ApiResponse({ status: 200, description: 'Payment approved successfully' })
@@ -288,7 +288,7 @@ export class PaymentsController {
 
   @Patch(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'staff')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reject payment (Admin only)' })
   @ApiResponse({ status: 200, description: 'Payment rejected successfully' })

@@ -32,7 +32,7 @@ export class BeverageMenuController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new beverage menu item (Admin only)' })
   @ApiResponse({
@@ -80,7 +80,7 @@ export class BeverageMenuController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a beverage menu item (Admin only)' })
   @ApiResponse({
@@ -120,7 +120,7 @@ export class BeverageMenuController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a beverage menu item (Admin only)' })
   @ApiResponse({

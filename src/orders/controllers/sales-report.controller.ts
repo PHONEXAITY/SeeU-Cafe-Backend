@@ -1,11 +1,5 @@
 // src/orders/controllers/sales-report.controller.ts
-import {
-  Controller,
-  Post,
-  Param,
-  UseGuards,
-  Get,
-} from '@nestjs/common';
+import { Controller, Post, Param, UseGuards, Get } from '@nestjs/common';
 import { OrdersService } from '../orders.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -39,7 +33,9 @@ export class SalesReportController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async triggerSalesReport(@Param('reportType') reportType: 'daily' | 'weekly' | 'monthly') {
+  async triggerSalesReport(
+    @Param('reportType') reportType: 'daily' | 'weekly' | 'monthly',
+  ) {
     return this.ordersService.triggerSalesReport(reportType);
   }
 
@@ -94,7 +90,7 @@ export class SalesReportController {
           email: testPayload.customerInfo.email,
           phone: testPayload.customerInfo.phone,
         },
-        order_details: testPayload.items.map(item => ({
+        order_details: testPayload.items.map((item) => ({
           food_menu: { name: item.name },
           quantity: item.quantity,
           price: item.price,
@@ -122,7 +118,9 @@ export class SalesReportController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Check n8n webhook configuration status (Admin only)' })
+  @ApiOperation({
+    summary: 'Check n8n webhook configuration status (Admin only)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Webhook configuration status',
@@ -139,21 +137,27 @@ export class SalesReportController {
     const status = Object.entries(webhookUrls).map(([type, url]) => ({
       type,
       configured: !!url,
-      url: url ? url.replace(/\/webhook\/.*$/, '/webhook/***') : 'Not configured',
+      url: url
+        ? url.replace(/\/webhook\/.*$/, '/webhook/***')
+        : 'Not configured',
     }));
 
-    const allConfigured = status.every(s => s.configured);
+    const allConfigured = status.every((s) => s.configured);
 
     return {
-      overallStatus: allConfigured ? 'All webhooks configured' : 'Some webhooks missing',
-      configured: status.filter(s => s.configured).length,
+      overallStatus: allConfigured
+        ? 'All webhooks configured'
+        : 'Some webhooks missing',
+      configured: status.filter((s) => s.configured).length,
       total: status.length,
       webhooks: status,
-      recommendations: allConfigured ? [] : [
-        'Configure missing webhook URLs in environment variables',
-        'Ensure n8n service is running and accessible',
-        'Check network connectivity between services',
-      ],
+      recommendations: allConfigured
+        ? []
+        : [
+            'Configure missing webhook URLs in environment variables',
+            'Ensure n8n service is running and accessible',
+            'Check network connectivity between services',
+          ],
       timestamp: new Date().toISOString(),
     };
   }

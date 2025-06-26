@@ -104,12 +104,13 @@ class PaginatedDeliveryResponseDto {
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class DeliveriesController {
   constructor(
-    private readonly deliveriesService: DeliveriesService, 
-    private readonly simpleDeliveryFeeService: SimpleDeliveryFeeService) {}
+    private readonly deliveriesService: DeliveriesService,
+    private readonly simpleDeliveryFeeService: SimpleDeliveryFeeService,
+  ) {}
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new delivery',
@@ -249,7 +250,7 @@ export class DeliveriesController {
 
   @Get(':id/location-history')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get delivery location history',
@@ -272,7 +273,7 @@ export class DeliveriesController {
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update delivery details',
@@ -302,7 +303,7 @@ export class DeliveriesController {
 
   @Patch(':id/status')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update delivery status',
@@ -343,7 +344,7 @@ export class DeliveriesController {
 
   @Patch(':id/time')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update delivery time',
@@ -373,7 +374,7 @@ export class DeliveriesController {
 
   @Patch(':id/location')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update delivery location',
@@ -467,7 +468,7 @@ export class DeliveriesController {
 
   @Get('employee/:employeeId/active')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get active deliveries for employee',
@@ -573,13 +574,13 @@ export class DeliveriesController {
     };
   }
 
-// ===== DELIVERY FEE SETTINGS ENDPOINTS =====
+  // ===== DELIVERY FEE SETTINGS ENDPOINTS =====
 
   @Get('settings/delivery-fee')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get delivery fee settings',
-    description: 'Retrieve current delivery fee configuration'
+    description: 'Retrieve current delivery fee configuration',
   })
   @ApiOkResponse({
     description: 'Delivery fee settings retrieved successfully',
@@ -590,13 +591,14 @@ export class DeliveriesController {
         perKmFee: { type: 'number', example: 2000 },
         freeDistance: { type: 'number', example: 3 },
         restaurantLat: { type: 'number', example: 19.8845 },
-        restaurantLng: { type: 'number', example: 102.135 }
-      }
-    }
+        restaurantLng: { type: 'number', example: 102.135 },
+      },
+    },
   })
   async getDeliveryFeeSettings() {
     try {
-      const settings = await this.simpleDeliveryFeeService.getDeliverySettings();
+      const settings =
+        await this.simpleDeliveryFeeService.getDeliverySettings();
       console.log('📤 Controller - Sending delivery settings:', settings);
       return settings;
     } catch (error) {
@@ -611,19 +613,39 @@ export class DeliveriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Update delivery fee settings',
-    description: 'Update delivery fee configuration (Admin only)'
+    description: 'Update delivery fee configuration (Admin only)',
   })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        baseFee: { type: 'number', example: 6000, description: 'Base delivery fee in LAK' },
-        perKmFee: { type: 'number', example: 2000, description: 'Fee per kilometer in LAK' },
-        freeDistance: { type: 'number', example: 3, description: 'Free delivery distance in KM' },
-        restaurantLat: { type: 'number', example: 19.8845, description: 'Restaurant latitude' },
-        restaurantLng: { type: 'number', example: 102.135, description: 'Restaurant longitude' }
-      }
-    }
+        baseFee: {
+          type: 'number',
+          example: 6000,
+          description: 'Base delivery fee in LAK',
+        },
+        perKmFee: {
+          type: 'number',
+          example: 2000,
+          description: 'Fee per kilometer in LAK',
+        },
+        freeDistance: {
+          type: 'number',
+          example: 3,
+          description: 'Free delivery distance in KM',
+        },
+        restaurantLat: {
+          type: 'number',
+          example: 19.8845,
+          description: 'Restaurant latitude',
+        },
+        restaurantLng: {
+          type: 'number',
+          example: 102.135,
+          description: 'Restaurant longitude',
+        },
+      },
+    },
   })
   @ApiOkResponse({
     description: 'Settings updated successfully',
@@ -639,23 +661,26 @@ export class DeliveriesController {
             perKmFee: { type: 'number' },
             freeDistance: { type: 'number' },
             restaurantLat: { type: 'number' },
-            restaurantLng: { type: 'number' }
-          }
+            restaurantLng: { type: 'number' },
+          },
         },
-        updatedCount: { type: 'number', example: 3 }
-      }
-    }
+        updatedCount: { type: 'number', example: 3 },
+      },
+    },
   })
-  async updateDeliveryFeeSettings(@Body() settings: {
-    baseFee?: number;
-    perKmFee?: number;
-    freeDistance?: number;
-    restaurantLat?: number;
-    restaurantLng?: number;
-  }) {
+  async updateDeliveryFeeSettings(
+    @Body()
+    settings: {
+      baseFee?: number;
+      perKmFee?: number;
+      freeDistance?: number;
+      restaurantLat?: number;
+      restaurantLng?: number;
+    },
+  ) {
     try {
       console.log('📥 Controller - Received settings update:', settings);
-      
+
       // Log each setting being updated
       Object.entries(settings).forEach(([key, value]) => {
         if (value !== undefined) {
@@ -663,11 +688,11 @@ export class DeliveriesController {
         }
       });
 
-      const result = await this.simpleDeliveryFeeService.updateDeliverySettings(settings);
-      
+      const result =
+        await this.simpleDeliveryFeeService.updateDeliverySettings(settings);
+
       console.log('✅ Controller - Settings updated successfully:', result);
       return result;
-
     } catch (error) {
       console.error('❌ Controller - Error updating settings:', error);
       throw error;
@@ -678,7 +703,7 @@ export class DeliveriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate delivery fee',
-    description: 'Calculate delivery fee based on customer location'
+    description: 'Calculate delivery fee based on customer location',
   })
   @ApiBody({
     schema: {
@@ -707,11 +732,11 @@ export class DeliveriesController {
             base_fee: { type: 'number', example: 6000 },
             distance_fee: { type: 'number', example: 0 },
             free_distance_km: { type: 'number', example: 3 },
-            chargeable_distance: { type: 'number', example: 0 }
-          }
-        }
-      }
-    }
+            chargeable_distance: { type: 'number', example: 0 },
+          },
+        },
+      },
+    },
   })
   async calculateDeliveryFee(
     @Body()
@@ -725,7 +750,7 @@ export class DeliveriesController {
 
       const result = await this.simpleDeliveryFeeService.calculateDeliveryFee(
         locationDto.customer_latitude,
-        locationDto.customer_longitude
+        locationDto.customer_longitude,
       );
 
       const response = {
@@ -739,13 +764,15 @@ export class DeliveriesController {
           base_fee: result.breakdown.baseFee,
           distance_fee: result.breakdown.distanceFee,
           free_distance_km: result.breakdown.freeDistance,
-          chargeable_distance: Math.max(0, result.distance - result.breakdown.freeDistance)
-        }
+          chargeable_distance: Math.max(
+            0,
+            result.distance - result.breakdown.freeDistance,
+          ),
+        },
       };
 
       console.log('📤 Controller - Sending calculation result:', response);
       return response;
-
     } catch (error) {
       console.error('❌ Controller - Error calculating fee:', error);
       throw error;
@@ -760,7 +787,7 @@ export class DeliveriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Debug delivery settings',
-    description: 'Get all delivery-related settings for debugging (Admin only)'
+    description: 'Get all delivery-related settings for debugging (Admin only)',
   })
   async debugDeliverySettings() {
     try {
@@ -770,7 +797,7 @@ export class DeliveriesController {
       return {
         success: true,
         count: settings.length,
-        settings: settings
+        settings: settings,
       };
     } catch (error) {
       console.error('❌ Debug - Error:', error);
@@ -784,7 +811,7 @@ export class DeliveriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Reset delivery settings to default',
-    description: 'Reset all delivery settings to default values (Admin only)'
+    description: 'Reset all delivery settings to default values (Admin only)',
   })
   async resetDeliverySettingsToDefault() {
     try {
@@ -802,22 +829,25 @@ export class DeliveriesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Test delivery fee calculation',
-    description: 'Test delivery fee calculation with specific coordinates'
+    description: 'Test delivery fee calculation with specific coordinates',
   })
   async testDeliveryCalculation(
     @Param('lat') lat: string,
-    @Param('lng') lng: string
+    @Param('lng') lng: string,
   ) {
     try {
       const latitude = parseFloat(lat);
       const longitude = parseFloat(lng);
-      
+
       console.log(`🧪 Test - Calculating for: ${latitude}, ${longitude}`);
 
-      const result = await this.simpleDeliveryFeeService.calculateDeliveryFee(latitude, longitude);
-      
+      const result = await this.simpleDeliveryFeeService.calculateDeliveryFee(
+        latitude,
+        longitude,
+      );
+
       console.log('📊 Test - Calculation result:', result);
-      
+
       return {
         input: { latitude, longitude },
         result: result,
@@ -825,15 +855,15 @@ export class DeliveriesController {
           distance: `${result.distance.toFixed(1)} km`,
           fee: `${result.deliveryFee.toLocaleString()} LAK`,
           time: `${result.estimatedTime} minutes`,
-          inServiceArea: result.isWithinDeliveryArea ? 'Yes' : 'No'
-        }
+          inServiceArea: result.isWithinDeliveryArea ? 'Yes' : 'No',
+        },
       };
     } catch (error) {
       console.error('❌ Test - Error:', error);
       throw error;
     }
   }
-/*   @Post('calculate-fee')
+  /*   @Post('calculate-fee')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Calculate delivery fee',

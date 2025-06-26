@@ -39,7 +39,7 @@ import {
 @ApiTags('Employees')
 @Controller('employees')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')
+@Roles('admin', 'staff', 'manager')
 @ApiBearerAuth()
 export class EmployeesController {
   constructor(

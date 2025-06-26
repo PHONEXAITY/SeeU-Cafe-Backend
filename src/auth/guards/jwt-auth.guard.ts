@@ -13,6 +13,18 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     const request = context.switchToHttp().getRequest();
     console.log('Request URL:', request.url);
     console.log('Method:', request.method);
+    const authHeader = request.headers.authorization;
+    console.log(
+      'Authorization Header:',
+      authHeader ? `${authHeader.substring(0, 20)}...` : 'None',
+    );
+
+    // ตรวจสอบ Cookies
+    const authToken = request.cookies?.auth_token;
+    console.log(
+      'Auth Token Cookie:',
+      authToken ? `${authToken.substring(0, 20)}...` : 'None',
+    );
 
     return super.canActivate(context);
   }

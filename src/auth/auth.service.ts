@@ -106,7 +106,7 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('อีเมลนี้มีผู้ใช้งานอยู่แล้ว');
+      throw new ConflictException('ອີເມວນີ້ມີຜູ້ໃຊ້ງານແລ້ວ');
     }
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
@@ -118,7 +118,7 @@ export class AuthService {
       customerRole = await this.prisma.role.create({
         data: {
           name: 'customer',
-          description: 'ลูกค้าที่มีสิทธิ์ในการสั่งอาหารและเครื่องดื่ม',
+          description: 'ລູກຄ້າທີ່ມີສິດໃນການສັ່ງອາຫານແລະເຄື່ອງດື່ມ',
         },
       });
     }
@@ -169,12 +169,20 @@ export class AuthService {
 
     const { password: _password, ...result } = user;
     return {
-      ...result,
       access_token: token,
       session_id: sessionId,
-      User_id: user.User_id.toString(),
-      role_name: user.role?.name,
-      message: 'ลงทะเบียนสำเร็จ',
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role?.name || 'customer',
+        first_name: user.first_name,
+        last_name: user.last_name,
+        profile_photo: user.profile_photo,
+        phone: user.phone,
+        address: user.address,
+        User_id: user.User_id.toString(),
+      },
+      message: 'ລົງທະບຽນສຳເລັດ',
     };
   }
   async changePassword(
@@ -277,21 +285,22 @@ export class AuthService {
 
   public setTokenCookie(response: Response, token: string, sessionId: string) {
     const secure = this.configService.get<string>('NODE_ENV') === 'production';
-    const domain = this.configService.get<string>('NODE_ENV') === 'production' 
-    ? this.configService.get<string>('COOKIE_DOMAIN') 
-    : undefined; // ไม่ตั้ง domain สำหรับ development
+    const domain =
+      this.configService.get<string>('NODE_ENV') === 'production'
+        ? this.configService.get<string>('COOKIE_DOMAIN')
+        : undefined; // ไม่ตั้ง domain สำหรับ development
 
     const maxAge =
       parseInt(
         this.configService.get<string>('JWT_EXPIRATION_SECONDS') ?? '604800',
       ) * 1000;
 
-        console.log('🍪 Setting cookies with config:', {
-    secure,
-    domain,
-    maxAge,
-    nodeEnv: this.configService.get<string>('NODE_ENV')
-  });
+    console.log('🍪 Setting cookies with config:', {
+      secure,
+      domain,
+      maxAge,
+      nodeEnv: this.configService.get<string>('NODE_ENV'),
+    });
 
     response.cookie('auth_token', token, {
       httpOnly: false,
@@ -315,11 +324,12 @@ export class AuthService {
   }
 
   private clearTokenCookie(response: Response) {
-    const domain = this.configService.get<string>('NODE_ENV') === 'production' 
-    ? this.configService.get<string>('COOKIE_DOMAIN') 
-    : undefined;
+    const domain =
+      this.configService.get<string>('NODE_ENV') === 'production'
+        ? this.configService.get<string>('COOKIE_DOMAIN')
+        : undefined;
 
-      console.log('🗑️ Clearing cookies with domain:', domain);
+    console.log('🗑️ Clearing cookies with domain:', domain);
 
     response.clearCookie('auth_token', {
       httpOnly: false,

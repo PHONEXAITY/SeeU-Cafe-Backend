@@ -30,7 +30,7 @@ export class FoodMenuController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new food menu item (Admin only)' })
   @ApiResponse({
@@ -78,7 +78,7 @@ export class FoodMenuController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a food menu item (Admin only)' })
   @ApiResponse({
@@ -96,7 +96,7 @@ export class FoodMenuController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a food menu item (Admin only)' })
   @ApiResponse({

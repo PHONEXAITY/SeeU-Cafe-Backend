@@ -36,7 +36,7 @@ export class CustomerNotificationsController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @ApiOperation({ summary: 'Create a new notification (Admin or Employee)' })
   @ApiResponse({
     status: 201,
@@ -70,8 +70,9 @@ export class CustomerNotificationsController {
     targetRoles: string[],
   ): boolean {
     if (userRole === 'admin') return true;
+    if (userRole === 'manager') return true;
 
-    if (userRole === 'employee') {
+    if (userRole === 'staff') {
       return targetRoles.every((role) => role === 'customer');
     }
 
@@ -80,7 +81,7 @@ export class CustomerNotificationsController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @ApiOperation({ summary: 'Get all notifications (Admin or Employee)' })
   @ApiQuery({
     name: 'userId',
@@ -172,7 +173,7 @@ export class CustomerNotificationsController {
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'employee')
+  @Roles('admin', 'staff', 'manager')
   @ApiOperation({ summary: 'Update a notification (Admin or Employee)' })
   @ApiResponse({
     status: 200,
@@ -207,7 +208,7 @@ export class CustomerNotificationsController {
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'staff', 'manager')
   @ApiOperation({ summary: 'Delete a notification (Admin only)' })
   @ApiResponse({
     status: 200,
@@ -221,7 +222,7 @@ export class CustomerNotificationsController {
 
   @Delete('user/:userId')
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'staff', 'customer', 'manager')
   @ApiOperation({
     summary: "Delete all of a user's notifications (Admin only)",
   })

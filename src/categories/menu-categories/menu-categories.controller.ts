@@ -30,7 +30,7 @@ export class MenuCategoriesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new menu category (Admin only)' })
   @ApiResponse({
@@ -66,7 +66,7 @@ export class MenuCategoriesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update a menu category (Admin only)' })
   @ApiResponse({
@@ -85,7 +85,7 @@ export class MenuCategoriesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a menu category (Admin only)' })
   @ApiResponse({

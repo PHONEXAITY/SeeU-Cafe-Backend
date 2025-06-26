@@ -41,7 +41,39 @@ export class AuthController {
     @Body() createUserDto: CreateUserDto,
     @Res({ passthrough: true }) response: Response,
   ) {
-    return this.authService.register(createUserDto, response);
+    /*  return this.authService.register(createUserDto, response); */
+    try {
+      console.log('📥 Registration request received:', {
+        email: createUserDto.email,
+        hasPassword: !!createUserDto.password,
+        firstName: createUserDto.first_name,
+        lastName: createUserDto.last_name,
+      });
+
+      const result = await this.authService.register(createUserDto, response);
+
+      console.log('📤 Registration result:', {
+        hasAccessToken: !!result.access_token,
+        hasUser: !!result.user,
+        userId: result.user?.id,
+        userEmail: result.user?.email,
+        message: result.message,
+      });
+
+      // ตรวจสอบว่า result มีข้อมูลครบถ้วนหรือไม่
+      if (!result.user || !result.access_token) {
+        console.error('❌ Incomplete registration result:', result);
+        throw new Error('Registration failed - incomplete response');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ Registration error in controller:', {
+        message: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
   }
 
   @Post('login')

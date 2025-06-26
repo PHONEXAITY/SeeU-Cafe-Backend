@@ -710,14 +710,14 @@ export class DeliveriesService {
     }
 
     // Special validation for OUT_FOR_DELIVERY
-    if (
+   /*  if (
       newStatus === DeliveryStatus.OUT_FOR_DELIVERY &&
       !delivery.employee_id
     ) {
       throw new BadRequestException(
         'Employee must be assigned before setting status to OUT_FOR_DELIVERY',
       );
-    }
+    } */
 
     try {
       const updatedDelivery = await this.prisma.delivery.update({

@@ -12,6 +12,7 @@ import {
   UploadedFile,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -56,7 +57,7 @@ export class UsersController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'ดึงข้อมูลผู้ใช้ทั้งหมด (เฉพาะผู้ดูแลระบบ)' })
   @ApiQuery({
@@ -72,7 +73,7 @@ export class UsersController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manger')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'ดึงข้อมูลผู้ใช้ตาม ID (เฉพาะผู้ดูแลระบบ)' })
   @ApiResponse({ status: 200, description: 'รายละเอียดผู้ใช้' })
@@ -141,27 +142,82 @@ export class UsersController {
 
   @Patch('my-profile')
   @UseGuards(JwtAuthGuard)
+  @Roles('customer')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current user profile' })
+  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'User not found' })
   async updateMyProfile(
     @User() user: UserPayload,
     @Body() updateUserDto: UpdateUserDto,
   ) {
-    console.log('=== Update My Profile ===');
+    console.log('\n=== Update My Profile Endpoint ===');
+    console.log('Endpoint hit: PATCH /users/my-profile');
     console.log('User from decorator:', user);
+    console.log('Update data received:', updateUserDto);
 
-    if (!user) {
-      console.log('NO USER FOUND IN REQUEST');
+    if (!user || !user.id) {
+      console.log('❌ NO USER FOUND IN REQUEST');
       throw new UnauthorizedException('User not authenticated');
     }
 
-    console.log('User ID:', user.id);
-    console.log('User role:', user.role);
-
-    return this.usersService.update(user.id, {
-      first_name: updateUserDto.first_name,
-      last_name: updateUserDto.last_name,
-      phone: updateUserDto.phone,
-      address: updateUserDto.address,
+    console.log('✅ User authenticated:', {
+      id: user.id,
+      email: user.email,
+      role: user.role,
     });
+
+    try {
+      const allowedUpdates = {
+        first_name: updateUserDto.first_name,
+        last_name: updateUserDto.last_name,
+        phone: updateUserDto.phone,
+        address: updateUserDto.address,
+      };
+
+      console.log('Calling usersService.update with:', allowedUpdates);
+
+      const result = await this.usersService.update(user.id, allowedUpdates);
+
+      console.log('✅ Update successful:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Update error:', error);
+
+      if (error instanceof NotFoundException) {
+        throw new NotFoundException('User not found');
+      }
+
+      throw new BadRequestException(
+        error.message || 'Failed to update profile',
+      );
+    }
+  }
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiResponse({
+    status: 200,
+    description: 'User profile returned successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCurrentUser(@User() user: UserPayload) {
+    console.log('\n=== Get Current User Profile ===');
+    console.log('User from decorator:', user);
+
+    if (!user || !user.id) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    try {
+      const userProfile = await this.usersService.findOne(user.id);
+      return userProfile;
+    } catch (error) {
+      console.error('Get current user error:', error);
+      throw new NotFoundException('User not found');
+    }
   }
 
   @Post('upload-photo')

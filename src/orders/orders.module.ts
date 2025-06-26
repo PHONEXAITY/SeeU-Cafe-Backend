@@ -16,10 +16,14 @@ import { CustomerNotificationsModule } from '../customer-notifications/customer-
 import { HttpModule } from '@nestjs/axios';
 
 @Module({
-  imports: [PrismaModule, CustomerNotificationsModule, HttpModule.register({
+  imports: [
+    PrismaModule,
+    CustomerNotificationsModule,
+    HttpModule.register({
       timeout: 10000,
       maxRedirects: 5,
-    }),],
+    }),
+  ],
   controllers: [
     OrdersController,
     OrderDetailsController,
