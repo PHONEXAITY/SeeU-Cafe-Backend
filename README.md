@@ -223,4 +223,4 @@ NODE_ENV=production npm run docker:up
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the PXDEV License - see the LICENSE file for details.
